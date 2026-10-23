@@ -21,8 +21,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import (alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
-               jobs, ldap_ad, mgmt, netscope, policy, reports, routeros, scope, security, tour, xlsx)
-from .db import (LDAP_KEYS, AcctSession, Alert, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
+               jobs, ldap_ad, mgmt, netobjects, netscope, policy, reports, routeros, scope, security, tour, xlsx)
+from .db import (LDAP_KEYS, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
@@ -1228,6 +1228,8 @@ def nas_delete(request: Request, nid: int):
     db = SessionLocal()
     n = db.get(Nas, nid)
     if n:
+        db.query(DeviceTraffic).filter(DeviceTraffic.nas_id == nid).delete()
+        db.query(NetObject).filter(NetObject.nas_id == nid).delete()
         db.delete(n)
         db.commit()
         nas_cache.invalidate()
@@ -2768,7 +2770,7 @@ def hotspot_warn(request: Request, u: str = ""):
     db = SessionLocal()
     try:
         name = (u or "").strip()[:150]
-        user = db.query(User).filter(User.username.ilike(name)).first() if name else None
+        user = db.query(User).filter(func.lower(User.username) == name.lower()).first() if name else None
         if user is None:
             return js
         stale = now() - timedelta(seconds=config.ACCT_INTERIM * 3 + 60)
@@ -3075,7 +3077,7 @@ async def grants_add(request: Request):
     db = SessionLocal()
     back = _local(form.get("back"), "/grants")
     name = str(form.get("username", "")).strip()
-    u = db.query(User).filter(User.username.ilike(name)).first() if name else None
+    u = db.query(User).filter(func.lower(User.username) == name.lower()).first() if name else None
     kind = str(form.get("kind", ""))
     start = _dt(form.get("start_day"), form.get("start_time"), "00:00")
     end = _dt(form.get("end_day"), form.get("end_time"), "23:59")
@@ -3107,3 +3109,93 @@ async def grants_revoke(request: Request, gid: int):
         log_action(request, "لغو مجوز موقت", str(gid))
         flash(request, "مجوز لغو شد")
     return redirect(_local(form.get("back"), "/grants"))
+
+
+
+# ------------------------------------------------------------------ network objects (servers, cameras, phones ...)
+@app.get("/netobjects", response_class=HTMLResponse)
+def netobjects_page(request: Request, edit: int = 0):
+    db = SessionLocal()
+    items = db.query(NetObject).order_by(NetObject.nas_id, NetObject.kind, NetObject.name).all()
+    e = db.get(NetObject, edit) if edit else None
+    return render(request, "netobjects.html", items=items, edit=e, kinds=netobjects.KINDS, kind_fa=netobjects.KIND_FA,
+                  routers=db.query(Nas).order_by(Nas.name).all(), nas_names=_nas_names(db))
+
+
+@app.post("/netobjects/save")
+async def netobjects_save(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    oid = _int(form.get("id"))
+    o = db.get(NetObject, oid) if oid else NetObject()
+    if o is None:
+        return redirect("/netobjects")
+    o.name = str(form.get("name", "")).strip()[:150]
+    o.kind = str(form.get("kind", "server")) if str(form.get("kind")) in netobjects.KIND_FA else "other"
+    o.nas_id = _int(form.get("nas_id"))
+    nets, bad = netscope.parse_ranges(str(form.get("addresses", "")))
+    o.addresses = str(form.get("addresses", "")).strip()
+    o.reach_external = _bool(form, "reach_external")
+    o.reach_tunnel = _bool(form, "reach_tunnel")
+    o.note = str(form.get("note", "")).strip()[:500]
+    if not o.name or not nets or bad:
+        flash(request, "نام و دست‌کم یک آدرس درست لازم است" + (f" (نادرست: {' '.join(bad)})" if bad else ""), "err")
+        return redirect(f"/netobjects?edit={oid}" if oid else "/netobjects")
+    db.add(o)
+    db.commit()
+    netobjects.index.refresh(force=True)
+    log_action(request, "ذخیره سرور / دستگاه شبکه", f"{o.name} {o.addresses}")
+    flash(request, f"«{o.name}» ذخیره شد")
+    return redirect("/netobjects")
+
+
+@app.post("/netobjects/{oid}/delete")
+def netobjects_delete(request: Request, oid: int):
+    db = SessionLocal()
+    o = db.get(NetObject, oid)
+    if o:
+        db.delete(o)
+        db.commit()
+        netobjects.index.refresh(force=True)
+        log_action(request, "حذف سرور / دستگاه شبکه", o.name)
+        flash(request, f"«{o.name}» حذف شد")
+    return redirect("/netobjects")
+
+
+def _office_routers(db, me):
+    q = db.query(Nas).order_by(Nas.name)
+    if scope.is_scoped(me):
+        oids = [o.id for o in scope.visible_offices(db, me)]
+        q = q.filter(Nas.office_id.in_(oids or [-1]))
+    return q.all()
+
+
+def _offices_ctx(request):
+    db = SessionLocal()
+    f, start, end = _report_filter(request, default_preset="month")
+    routers = _office_routers(db, request.state.me)
+    nid = _int(request.query_params.get("nas"))
+    chosen = [n for n in routers if n.id == nid] if nid else routers
+    rep = netobjects.report(db, f.start, f.end, [n.id for n in chosen])
+    wan = mgmt.router_internet(db, f.start, f.end, chosen)
+    caption = " · ".join(x for x in (scope.scope_label(db, request.state.me),
+                                      chosen[0].name if nid and chosen else "") if x)
+    return db, rep, {"rep": rep, "wan": wan, "routers": routers, "nas_id": nid, "start": jalali.to_jalali_str(start),
+                     "end": jalali.to_jalali_str(end), "qs": str(request.query_params), "caption": caption,
+                     "kind_fa": netobjects.KIND_FA, "f": f}
+
+
+@app.get("/offices", response_class=HTMLResponse)
+def offices_report(request: Request):
+    db, rep, ctx = _offices_ctx(request)
+    return render(request, "offices.html", **ctx)
+
+
+@app.get("/offices/export.xlsx")
+def offices_export(request: Request):
+    db, rep, ctx = _offices_ctx(request)
+    data = xlsx.offices_xlsx(rep, ctx["wan"], f"گزارش دفاتر {ctx['start']} تا {ctx['end']}"
+                             + (f" — {ctx['caption']}" if ctx["caption"] else ""), netobjects.KIND_FA)
+    log_action(request, "خروجی Excel گزارش دفاتر", f"{ctx['start']}..{ctx['end']}")
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="offices-{ctx["f"].start.date().isoformat()}.xlsx"'})

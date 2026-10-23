@@ -1995,3 +1995,95 @@ def test_issabel_queues_live_calls_ad_suggestions_and_missed_alert(env, monkeypa
         db.query(Call).delete()
         db.commit()
         db.close()
+
+
+def test_office_report_by_device_and_network_objects(env):
+    """Branch without hotspot users: every device's traffic from NetFlow by MAC (with its Windows user), split into
+    internet / tunnel / LAN and the defined servers, cameras and phones; a camera sending to HQ over the tunnel."""
+    from datetime import timedelta
+
+    from app import netobjects, netscope
+    from app.db import Device, DeviceTraffic, IfaceDaily, NetObject, now
+    from app.netflow import Collector
+    from app.web import app
+    db = SessionLocal()
+    br = Nas(name="شعبه بدون هات‌اسپات", ip="10.66.0.1", secret="x", wan_interfaces="ether1",
+             lan_ranges="192.168.66.0/24", tunnel_ranges="192.168.1.0/24")
+    db.add(br)
+    db.commit()
+    nid = br.id
+    db.add_all([
+        NetObject(name="سرور فایل مرکزی", kind="server", addresses="192.168.1.10", reach_tunnel=True),
+        NetObject(name="ایزابل", kind="pbx", addresses="192.168.1.5"),
+        NetObject(name="دوربین‌های شعبه", kind="camera", nas_id=nid, addresses="192.168.66.200-192.168.66.210"),
+        NetObject(name="NVR مرکزی", kind="nvr", addresses="192.168.1.20", reach_external=False),
+        Device(mac="AA:BB:F0:00:00:01", last_ip="192.168.66.15", last_nas_id=nid, device_type="pc",
+               hostname="PC-ACC1", logon_user="m.karimi", last_seen=now()),
+        Device(mac="AA:BB:F0:00:00:02", last_ip="192.168.66.201", last_nas_id=nid, device_type="camera",
+               last_seen=now()),
+        Device(mac="AA:BB:F0:00:00:03", last_ip="192.168.66.40", last_nas_id=nid, device_type="phone",
+               last_seen=now()),
+        IfaceDaily(nas_id=nid, iface="ether1", day=now().date(), rx=900 * 1024 ** 2, tx=300 * 1024 ** 2),
+    ])
+    db.commit()
+    db.close()
+    netscope.scope.refresh(force=True)
+    netobjects.index.refresh(force=True)
+    MB = 1024 * 1024
+    col = Collector()
+    ts = now()
+    netobjects.index.flush()                                   # flows of earlier tests' routers
+    db = SessionLocal()
+    db.query(DeviceTraffic).delete()
+    db.commit()
+    db.close()
+
+    def flow(src, dst, b, dport=443):
+        col.add_flow({"src": src, "dst": dst, "bytes": b, "sport": 50000, "dport": dport, "proto": 6, "in_if": 0,
+                      "out_if": 0}, ts, rid=nid)
+    flow("192.168.66.15", "8.8.8.8", 10 * MB)                  # PC -> internet
+    flow("142.250.1.1", "192.168.66.15", 40 * MB)              # internet -> PC
+    flow("192.168.66.15", "192.168.1.10", 25 * MB, 445)        # PC -> HQ file server (tunnel)
+    flow("192.168.1.10", "192.168.66.15", 5 * MB, 50000)
+    flow("192.168.66.15", "192.168.66.7", 3 * MB)              # PC -> printer in the office
+    flow("192.168.66.201", "192.168.1.20", 60 * MB, 554)       # camera -> HQ NVR over the tunnel
+    flow("192.168.66.201", "1.2.3.4", 2 * MB)                  # camera -> internet (not allowed)
+    flow("192.168.66.40", "192.168.1.5", 4 * MB, 5060)         # phone -> Issabel
+    flow("10.9.9.9", "8.8.4.4", 99 * MB)                       # not this office: ignored
+    netobjects.index.flush()
+    db = SessionLocal()
+    rep = netobjects.report(db, ts - timedelta(hours=1), ts + timedelta(hours=1), [nid])
+    groups = {g["key"]: g["total"] for g in rep["groups"]}
+    assert groups == {"internet": 52 * MB, "tunnel": 0, "lan": 3 * MB}
+    assert rep["objects_total"] == 94 * MB and rep["total"] == 149 * MB
+    pc = next(e for e in rep["devices"] if e["mac"] == "AA:BB:F0:00:00:01")
+    assert (pc["internet"], pc["objects"], pc["lan"], pc["windows_user"]) == (50 * MB, 30 * MB, 3 * MB, "m.karimi")
+    objs = {x["obj"].name: x for x in rep["objects"]}
+    assert objs["سرور فایل مرکزی"]["total"] == 30 * MB and objs["سرور فایل مرکزی"]["devices"] == 1
+    assert objs["دوربین‌های شعبه"]["total"] == 62 * MB and objs["دوربین‌های شعبه"]["internet"] == 2 * MB
+    assert objs["NVR مرکزی"]["total"] == 60 * MB and objs["ایزابل"]["total"] == 4 * MB
+    kinds = {k["kind"]: k["total"] for k in rep["kinds"]}
+    assert kinds["camera"] == 62 * MB and kinds["pbx"] == 4 * MB and kinds["phone"] == 4 * MB
+    db.close()
+    with TestClient(app) as c:
+        _login(c, "admin", "Secret12345")
+        r = c.get(f"/offices?nas={nid}&preset=today")
+        assert r.status_code == 200 and "m.karimi" in r.text and "دوربین‌های شعبه" in r.text and "1.17 GB" in r.text
+        assert c.get("/offices/export.xlsx?preset=today").status_code == 200
+        assert c.get("/netobjects").status_code == 200
+        r = c.post("/netobjects/save", data={"name": "سرور مالی", "kind": "server", "addresses": "192.168.1.30\nbad",
+                                             "nas_id": ""}, follow_redirects=True)
+        assert "نادرست" in r.text
+        c.post("/netobjects/save", data={"name": "سرور مالی", "kind": "server", "addresses": "192.168.1.30",
+                                         "reach_tunnel": "1"})
+        assert "سرور مالی" in c.get("/netobjects").text
+    db = SessionLocal()
+    db.query(DeviceTraffic).delete()
+    db.query(NetObject).delete()
+    db.query(IfaceDaily).filter(IfaceDaily.nas_id == nid).delete()
+    db.query(Device).filter(Device.mac.like("AA:BB:F0:%")).delete(synchronize_session=False)
+    db.query(Nas).filter(Nas.id == nid).delete()
+    db.commit()
+    db.close()
+    netscope.scope.refresh(force=True)
+    netobjects.index.refresh(force=True)

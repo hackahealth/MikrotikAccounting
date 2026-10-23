@@ -500,6 +500,39 @@ class NetEvent(Base):
     ended_at = Column(DateTime, nullable=True)            # when this state ended
 
 
+class NetObject(Base):
+    """A known destination or device of an office network: server (automation, finance, file ...), camera, NVR,
+    phone, Issabel ... Traffic to / from it is reported apart."""
+    __tablename__ = "net_objects"
+    id = Column(Integer, primary_key=True)
+    nas_id = Column(Integer, nullable=True, index=True)      # router / office it sits behind; None = every office
+    kind = Column(String(20), default="server")               # netobjects.KINDS
+    name = Column(String(150), nullable=False)
+    addresses = Column(Text, default="")                      # IP / CIDR / range per line
+    reach_external = Column(Boolean, default=False)          # reachable from the internet
+    reach_tunnel = Column(Boolean, default=True)              # reachable from the other offices through the tunnel
+    note = Column(String(500), default="")
+    created_at = Column(DateTime, default=now)
+
+
+class DeviceTraffic(Base):
+    """NetFlow per router / day / local device (MAC + IP) / destination: internet | tunnel | lan | obj.
+    Independent of hotspot / VPN users: every device behind the router."""
+    __tablename__ = "device_traffic"
+    id = Column(Integer, primary_key=True)
+    nas_id = Column(Integer, index=True)
+    day = Column(Date, index=True)
+    mac = Column(String(17), default="", index=True)
+    ip = Column(String(45), default="")
+    target = Column(String(10))                               # internet|tunnel|lan|obj
+    obj_id = Column(Integer, default=0)                       # the destination object (target obj)
+    local_obj = Column(Integer, default=0)                    # the local device is itself an object (a camera ...)
+    bytes_down = Column(BigInteger, default=0)                # towards the local device
+    bytes_up = Column(BigInteger, default=0)
+    flows = Column(Integer, default=0)
+    __table_args__ = (UniqueConstraint("nas_id", "day", "mac", "ip", "target", "obj_id", "local_obj", name="uq_dt"),)
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key = Column(String(100), primary_key=True)

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>سرورها و دستگاه‌های شبکه</h2><a class="btn" href="/offices">گزارش دفاتر</a></div>
+<p class="hint">سرورهای هر دفتر (اتوماسیون، مالی، فایل ...)، دوربین‌ها و NVR، تلفن‌ها و ایزابل را اینجا تعریف کنید. ترافیک هر دستگاه به سمت هر کدام در «گزارش دفاتر» جدا نشان داده می‌شود. ترافیک خود دوربین‌ها هم جدا می‌آید، مثلاً ارسال تصویر به دفتر مرکزی از راه تانل. «دسترسی از اینترنت» و «دسترسی از تانل» مشخص می‌کند این سرور از کجا باید قابل دسترس باشد؛ مرحلهٔ بعد (مقاصد مجاز و هشدار دسترسی) از همین فهرست استفاده می‌کند.</p>
+<div class="card"><h3>{{ 'ویرایش ' ~ edit.name if edit else 'افزودن' }}</h3>
+<form method="post" action="/netobjects/save">{% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+<div class="grid g3">
+  <div class="fg"><label>نام</label><input name="name" value="{{ edit.name if edit else '' }}" placeholder="سرور اتوماسیون اداری" required></div>
+  <div class="fg"><label>نوع</label><select name="kind">{% for k, v in kinds %}<option value="{{ k }}" {{ 'selected' if edit and edit.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>دفتر / روتر</label><select name="nas_id"><option value="">همه دفاتر</option>{% for n in routers %}<option value="{{ n.id }}" {{ 'selected' if edit and edit.nas_id == n.id }}>{{ n.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>آدرس‌ها (IP، رنج یا CIDR، هر خط یکی)</label><textarea name="addresses" class="ltr" rows="3" placeholder="192.168.1.10&#10;192.168.1.50-192.168.1.80   # دوربین‌ها">{{ edit.addresses if edit else '' }}</textarea></div>
+  <div class="fg"><label>دسترسی</label>
+    <label><input type="checkbox" name="reach_external" value="1" {{ 'checked' if edit and edit.reach_external }}> از اینترنت قابل دسترس است</label><br>
+    <label><input type="checkbox" name="reach_tunnel" value="1" {{ 'checked' if not edit or edit.reach_tunnel }}> از دفاتر دیگر (تانل) قابل دسترس است</label></div>
+  <div class="fg"><label>توضیح</label><input name="note" value="{{ edit.note if edit else '' }}"></div>
+</div>
+<button class="btn p">ذخیره</button>{% if edit %} <a class="btn" href="/netobjects">انصراف</a>{% endif %}
+</form>
+<p class="hint">دوربین یا تلفنی که نوعش در صفحهٔ «دستگاه‌ها» تعیین شده باشد، بدون تعریف اینجا هم در جمع دوربین‌ها و تلفن‌ها حساب می‌شود. تعریف اینجا برای وقتی است که بخواهید آن را با نام و جدا ببینید، یا یک رنج کامل را یکجا تعریف کنید.</p></div>
+<div class="card tbl"><table>
+<tr><th>نام</th><th>نوع</th><th>دفتر</th><th>آدرس‌ها</th><th>از اینترنت</th><th>از تانل</th><th>توضیح</th><th></th></tr>
+{% for o in items %}<tr><td>{{ o.name }}</td><td>{{ kind_fa.get(o.kind, o.kind) }}</td><td>{{ nas_names.get(o.nas_id, 'همه دفاتر') if o.nas_id else 'همه دفاتر' }}</td>
+<td class="ltr wrap">{{ o.addresses|replace('\n', '، ') }}</td>
+<td>{% if o.reach_external %}<span class="badge warn">بله</span>{% else %}خیر{% endif %}</td><td>{{ 'بله' if o.reach_tunnel else 'خیر' }}</td><td class="wrap">{{ o.note }}</td>
+<td style="white-space:nowrap"><a class="btn s" href="/netobjects?edit={{ o.id }}">ویرایش</a>
+<form class="inline" method="post" action="/netobjects/{{ o.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">هنوز چیزی تعریف نشده</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

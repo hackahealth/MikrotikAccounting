@@ -15,7 +15,7 @@
 </div>
 <div class="card"><h3>به تفکیک روتر / دفتر (از شمارنده اینترفیس‌ها، مستقل از کاربر)</h3><div class="tbl"><table>
 <tr><th>روتر</th><th>اینترفیس WAN</th><th>کل اینترنت</th><th>دانلود</th><th>آپلود</th><th>تانل</th><th>اینترنت منهای تانل</th><th>سهم از کل</th></tr>
-{% for r in rt.rows %}<tr><td>{{ r.name }}</td><td class="ltr">{{ r.wan_ifs|join(', ') or '-' }}{% if r.tun_ifs %}<div class="hint">تانل: {{ r.tun_ifs|join(', ') }}</div>{% endif %}</td>
+{% for r in rt.rows %}<tr><td><a href="/offices?nas={{ r.nas.id }}&amp;from={{ start }}&amp;to={{ end }}">{{ r.name }}</a></td><td class="ltr">{{ r.wan_ifs|join(', ') or '-' }}{% if r.tun_ifs %}<div class="hint">تانل: {{ r.tun_ifs|join(', ') }}</div>{% endif %}</td>
 <td class="ltr">{{ r.wan|bytes }}</td><td class="ltr">{{ r.wan_rx|bytes }}</td><td class="ltr">{{ r.wan_tx|bytes }}</td><td class="ltr">{{ r.tunnel|bytes }}</td><td class="ltr">{{ r.pure|bytes }}</td>
 <td>{{ (100 * r.wan / rt.total.wan)|round(1) if rt.total.wan else 0 }}٪</td></tr>{% endfor %}
 </table></div><p class="hint">این اعداد از شمارنده بایت اینترفیس‌ها (API روتر، هر دقیقه) است و همهٔ دستگاه‌ها را شامل می‌شود؛ اعداد بالای کاربران فقط ترافیک کاربران هات‌اسپات / VPN است. اینترفیس WAN و تانل در فرم هر روتر تعیین می‌شود.</p></div>

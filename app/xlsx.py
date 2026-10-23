@@ -276,3 +276,32 @@ def simple_xlsx(title, headers, rows, caption=None, widths=None):
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def offices_xlsx(rep, wan, caption, kind_fa):
+    """Office / router report: interface totals, destinations, servers and devices, device traffic."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    t = wan["total"]
+    summary = [("کل اینترنت واقعی - اینترفیس WAN (GB)", gb(t["wan"])), ("تانل - اینترفیس تانل (GB)", gb(t["tunnel"])),
+               ("اینترنت منهای تانل (GB)", gb(t["pure"])),
+               ("ترافیک دستگاه‌ها از NetFlow (GB)", gb(rep["total"]))]
+    summary += [(f"{g['name']} (GB)", gb(g["total"])) for g in rep["groups"]]
+    summary += [(f"{k['name']} ({k['count']} مورد) (GB)", gb(k["total"])) for k in rep["kinds"]]
+    sheet(wb, "خلاصه", ["شاخص", "مقدار"], summary, {1: 44, 2: 18}, caption=caption)
+    sheet(wb, "روترها", ["روتر", "کل اینترنت (GB)", "دانلود (GB)", "آپلود (GB)", "تانل (GB)", "اینترنت منهای تانل (GB)"],
+          [(r["name"], gb(r["wan"]), gb(r["wan_rx"]), gb(r["wan_tx"]), gb(r["tunnel"]), gb(r["pure"])) for r in wan["rows"]],
+          {1: 20})
+    sheet(wb, "سرورها و دستگاه‌ها", ["نام", "نوع", "دفتر", "آدرس", "از اینترنت", "از تانل", "ترافیک (GB)",
+                                      "دستگاه‌های مرتبط"],
+          [(x["obj"].name, kind_fa.get(x["obj"].kind, x["obj"].kind), x["router"], x["obj"].addresses.replace("\n", " "),
+            "بله" if x["obj"].reach_external else "خیر", "بله" if x["obj"].reach_tunnel else "خیر", gb(x["total"]),
+            x["devices"]) for x in rep["objects"]], {1: 24, 3: 16, 4: 24})
+    sheet(wb, "دستگاه‌ها", ["روتر", "MAC", "IP", "نام", "نوع", "کاربر ویندوز", "کاربر هات‌اسپات", "اینترنت (GB)",
+                            "تانل (GB)", "شبکه داخلی (GB)", "سرورها و دستگاه‌ها (GB)", "مجموع (GB)"],
+          [(e["router"], e["mac"], e["ips"], e["name"], e["type"], e["windows_user"], e["hotspot_user"], gb(e["internet"]),
+            gb(e["tunnel"]), gb(e["lan"]), gb(e["objects"]), gb(e["total"])) for e in rep["devices"]],
+          {1: 16, 2: 19, 3: 16, 4: 20, 6: 16, 7: 16})
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

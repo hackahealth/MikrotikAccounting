@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>گزارش دفاتر <span class="hint">{{ start }} تا {{ end }}{{ ' · ' ~ caption if caption }}</span></h2>
+<div><a class="btn p" href="/offices/export.xlsx?{{ qs }}">دانلود Excel</a> <button class="btn" onclick="window.print()">چاپ / PDF</button></div></div>
+<div class="card"><form class="filters" method="get">
+  <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
+    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر')] %}
+    <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'month' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>
+  <div><label>دفتر / روتر</label><select name="nas"><option value="">همه</option>{% for n in routers %}<option value="{{ n.id }}" {{ 'selected' if nas_id == n.id }}>{{ n.name }}</option>{% endfor %}</select></div>
+  <div><button class="btn p" onclick="this.form.preset.value=''">نمایش</button></div>
+</form></div>
+<p class="hint">این گزارش به کاربر هات‌اسپات وابسته نیست. اعداد بالا از شمارندهٔ اینترفیس‌های روتر و بقیه از NetFlow همهٔ دستگاه‌های پشت روتر می‌آید. هر دستگاه با MAC، کاربر ویندوزی که آخرین بار روی آن وارد شده و کاربر هات‌اسپات نشان داده می‌شود.</p>
+{% set t = wan.total %}
+<div class="grid g3">
+  <div class="card stat kpi"><div class="l">کل اینترنت واقعی (اینترفیس WAN)</div><div class="v ltr">{{ t.wan|bytes }}</div><div class="hint">دانلود <span class="ltr">{{ t.wan_rx|bytes }}</span> · آپلود <span class="ltr">{{ t.wan_tx|bytes }}</span></div></div>
+  <div class="card stat kpi"><div class="l">تانل (اینترفیس تانل)</div><div class="v ltr">{{ t.tunnel|bytes }}</div><div class="hint">حامل ارتباط با دفاتر دیگر روی همان اینترنت</div></div>
+  <div class="card stat kpi"><div class="l">اینترنت منهای تانل</div><div class="v ltr">{{ t.pure|bytes }}</div><div class="hint">وب و سایر استفاده‌های اینترنت</div></div>
+</div>
+{% if not rep.has_data %}<div class="card"><p class="muted">برای این دوره دادهٔ NetFlow دستگاه‌ها نیست. Traffic-Flow روترها باید به این برنامه ارسال شود (صفحهٔ روترها).</p></div>{% else %}
+<div class="grid g2">
+  <div class="card tbl"><h3>مقصد ترافیک دستگاه‌ها</h3><table><tr><th>مقصد</th><th>دانلود</th><th>آپلود</th><th>مجموع</th><th>سهم</th></tr>
+  {% for g in rep.groups %}<tr><td>{{ g.name }}</td><td class="ltr">{{ g.down|bytes }}</td><td class="ltr">{{ g.up|bytes }}</td><td class="ltr">{{ g.total|bytes }}</td><td>{{ (100 * g.total / rep.total)|round(1) if rep.total else 0 }}٪</td></tr>{% endfor %}
+  <tr><td>سرورها و دستگاه‌های تعریف‌شده</td><td colspan="2"></td><td class="ltr">{{ rep.objects_total|bytes }}</td><td>{{ (100 * rep.objects_total / rep.total)|round(1) if rep.total else 0 }}٪</td></tr>
+  </table></div>
+  <div class="card tbl"><h3>به تفکیک نوع</h3><table><tr><th>نوع</th><th>تعداد</th><th>ترافیک</th></tr>
+  {% for k in rep.kinds %}<tr><td>{{ k.name }}</td><td>{{ k.count }}</td><td class="ltr">{{ k.total|bytes }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">هنوز سرور، دوربین یا تلفنی تعریف نشده. {% if 'nas_manage' in perms %}<a href="/netobjects">تعریف کنید</a>{% endif %}</td></tr>{% endfor %}</table></div>
+</div>
+{% if rep.objects %}<div class="card tbl"><h3>سرورها، دوربین‌ها و تلفن‌ها</h3><table>
+<tr><th>نام</th><th>نوع</th><th>دفتر</th><th>ترافیک</th><th>دستگاه‌های مرتبط</th><th>خودش به اینترنت</th><th>خودش روی تانل</th><th>قابل دسترس</th></tr>
+{% for x in rep.objects %}<tr><td>{{ x.obj.name }}</td><td>{{ kind_fa.get(x.obj.kind, x.obj.kind) }}</td><td>{{ x.router }}</td><td class="ltr">{{ x.total|bytes }}</td><td>{{ x.devices or '-' }}</td>
+<td class="ltr">{% if x.internet %}{% if not x.obj.reach_external %}<span class="badge warn">{{ x.internet|bytes }}</span>{% else %}{{ x.internet|bytes }}{% endif %}{% else %}-{% endif %}</td>
+<td class="ltr">{{ x.tunnel|bytes if x.tunnel else '-' }}</td>
+<td>{{ 'اینترنت' if x.obj.reach_external }}{{ '، ' if x.obj.reach_external and x.obj.reach_tunnel }}{{ 'تانل' if x.obj.reach_tunnel }}{{ 'فقط داخل دفتر' if not x.obj.reach_external and not x.obj.reach_tunnel }}</td></tr>{% endfor %}
+</table><p class="hint">نشان نارنجی: ترافیک اینترنتی دستگاهی که «از اینترنت قابل دسترس» علامت نخورده است.</p></div>{% endif %}
+<div class="card tbl"><h3>دستگاه‌ها <span class="hint">{{ rep.devices|length }} دستگاه، پرمصرف‌ترین‌ها اول</span></h3><table>
+<tr><th>روتر</th><th>دستگاه</th><th>نوع</th><th>کاربر ویندوز</th><th>کاربر هات‌اسپات</th><th>اینترنت</th><th>تانل</th><th>شبکه داخلی</th><th>سرورها و ...</th><th>مجموع</th></tr>
+{% for e in rep.devices[:300] %}<tr><td>{{ e.router }}</td>
+<td>{% if e.mac %}<a class="ltr" href="/devices/{{ e.mac }}">{{ e.mac }}</a>{% endif %}{% if e.name %} {{ e.name }}{% endif %}<div class="hint ltr">{{ e.ips }}</div></td>
+<td>{{ e.type }}{% if e.local_obj %} <span class="badge">{{ e.local_obj.name }}</span>{% endif %}</td><td>{{ e.windows_user or '-' }}</td><td>{{ e.hotspot_user or '-' }}</td>
+<td class="ltr">{{ e.internet|bytes }}</td><td class="ltr">{{ e.tunnel|bytes }}</td><td class="ltr">{{ e.lan|bytes }}</td><td class="ltr">{{ e.objects|bytes }}</td><td class="ltr"><b>{{ e.total|bytes }}</b></td></tr>
+{% endfor %}</table></div>
+{% endif %}
+{% endblock %}

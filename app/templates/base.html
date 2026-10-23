@@ -16,6 +16,7 @@
   {% if 'attendance' in perms %}<a href="/attendance" data-tour="attendance" class="{{ 'on' if p.startswith('/attendance') }}">ساعات اتصال کارکنان</a>{% endif %}
   {% if 'calls_view' in perms %}<a href="/calls" data-tour="calls" class="{{ 'on' if p.startswith('/calls') }}">تماس‌ها</a>{% endif %}
   {% if 'reports_view' in perms %}<a href="/reports" data-tour="reports" class="{{ 'on' if p.startswith('/reports') }}">گزارش‌های مصرف</a>{% endif %}
+  {% if 'mgmt_reports' in perms or 'router_traffic' in perms %}<a href="/offices" class="{{ 'on' if p.startswith('/offices') }}">گزارش دفاتر</a>{% endif %}
   {% if 'router_traffic' in perms %}<a href="/traffic" data-tour="traffic" class="{{ 'on' if p.startswith('/traffic') }}">ترافیک روترها</a>{% endif %}
   {% if 'live_view' in perms %}<a href="/live" data-tour="live" class="{{ 'on' if p.startswith('/live') }}">کاربران آنلاین</a>{% endif %}
   {% if 'users_view' in perms %}<a href="/users" data-tour="users" class="{{ 'on' if p.startswith('/users') }}">{{ 'کارکنان' if scope_label else 'کاربران' }}</a>
@@ -31,7 +32,8 @@
   {% if 'mt_local' in perms %}<a href="/mt-local" data-tour="mt_local" class="{{ 'on' if p.startswith('/mt-local') }}">اکانت‌های محلی میکروتیک</a>{% endif %}
   {% if 'hotspot_deploy' in perms %}<a href="/hotspot" data-tour="hotspot" class="{{ 'on' if p.startswith('/hotspot') }}">فولدر hotspot روترها</a>{% endif %}
   {% if 'pbx_manage' in perms %}<a href="/pbx" data-tour="pbx" class="{{ 'on' if p.startswith('/pbx') }}">سرورهای ایزابل</a>{% endif %}
-  {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>{% endif %}
+  {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>
+  <a href="/netobjects" class="{{ 'on' if p.startswith('/netobjects') }}">سرورها و دستگاه‌های شبکه</a>{% endif %}
   {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') }}">Active Directory</a>{% endif %}
   {% if 'panel_users' in perms %}<a href="/admins" data-tour="admins" class="{{ 'on' if p.startswith('/admins') }}">کاربران پنل</a>{% endif %}
   {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}

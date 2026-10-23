@@ -7,6 +7,8 @@ import subprocess
 import threading
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
+
 from . import devices
 from .db import Device, DeviceHistory, User, SessionLocal, decrypt, get_setting, now, set_setting
 
@@ -127,7 +129,7 @@ def message(db, username):
         return None
     lines = [c["text"].strip()] if (c["text"] or "").strip() else []
     name = _clean_user(username)
-    u = db.query(User).filter(User.username.ilike(name)).first() if name else None
+    u = db.query(User).filter(func.lower(User.username) == name.lower()).first() if name else None
     if u is not None and c["quota"] != "never":
         w = policy.quota_warning(db, u)
         if w:

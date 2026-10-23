@@ -99,6 +99,8 @@ ROUTES = [
     ("GET", r"/org", "org_manage"), ("POST", r"/org/.*", "org_manage"),
     ("GET", r"/mt-local", "mt_local"), ("POST", r"/mt-local/.*", "mt_local"),
     ("GET", r"/hotspot(/\d+/(download|files|edit))?", "hotspot_deploy"), ("POST", r"/hotspot/.*", "hotspot_deploy"),
+    ("GET", r"/netobjects", "nas_manage"), ("POST", r"/netobjects/.*", "nas_manage"),
+    ("GET", r"/offices", "mgmt_reports|router_traffic"), ("GET", r"/offices/export\.xlsx", "mgmt_reports|router_traffic"),
     ("GET", r"/monitor", "net_monitor"), ("POST", r"/monitor/settings", "net_monitor"),
     ("GET", r"/alerts", "alerts_view"), ("POST", r"/alerts/read", "alerts_view"),
     ("GET", r"/security", "security_manage"), ("POST", r"/security/.*", "security_manage"),

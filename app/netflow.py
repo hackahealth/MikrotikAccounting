@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from datetime import timedelta
 
-from . import classifier, config, netscope, udp
+from . import classifier, config, netobjects, netscope, udp
 from .db import AcctSession, Nas, SessionLocal, TrafficCategory, TrafficDomain, now
 
 log = logging.getLogger("netflow")
@@ -208,6 +208,10 @@ class Collector:
             e["flows"] += 1
         # routers behind NAT all reach us from one address: the router of the user's session tells them apart
         hint = rid if rid is not None else netscope.scope.router_id(exporter) if exporter else None
+        try:
+            netobjects.index.account(hint, f, ts)        # every device behind the router, user or not
+        except Exception:
+            log.exception("device traffic")
         hit = self._user(f["src"], hint) or self._user(f.get("post_src"), hint)
         if hit:
             remote, rport, down, up = f["dst"], f["dport"], 0, f["bytes"]
@@ -243,6 +247,7 @@ class Collector:
             d[2] += up
 
     def flush(self):
+        netobjects.index.flush()
         with self.lock:
             cats, doms = self.cat_buf, self.dom_buf
             self.cat_buf, self.dom_buf = defaultdict(lambda: [0, 0, 0]), defaultdict(lambda: ["", 0, 0])
