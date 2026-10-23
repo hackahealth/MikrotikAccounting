@@ -1,1 +1,1 @@
-VERSION = "1.12.0"     # 2026-10-23: monitoring, failed-login locks, temporary grants, logon popup, quota warning
+VERSION = "1.13.0"     # 2026-10-23: Issabel queues, live calls (AMI), AD ipPhone suggestions, missed-call alert
