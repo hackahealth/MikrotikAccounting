@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import (alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
-               jobs, ldap_ad, mgmt, netobjects, netscope, policy, reports, routeros, scope, security, tour, xlsx)
+               jobs, ldap_ad, mgmt, netobjects, netscope, policy, reports, retention, rosadmin, routeros, scope, security, tour, xlsx)
 from .db import (LDAP_KEYS, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
@@ -1408,6 +1408,8 @@ def _report_filter(request: Request, default_preset="today"):
         start = jalali.jalali_month_start(end)
     elif preset == "90d":
         start, end = today - timedelta(days=89), today
+    elif preset == "180d":
+        start, end = today - timedelta(days=179), today
     start = start or today
     end = end or today
     db = SessionLocal()
@@ -2731,6 +2733,13 @@ def _my_context(db, u):
     rep = reports.build(db, reports.Filter(today - timedelta(days=29), end, ids=[u.id]), session_limit=20)
     month = reports.split_usage(db, policy.period_start("monthly"), end, [u.id])
     day = reports.split_usage(db, today, end, [u.id])
+    history, m_end = [], end
+    m_start = jalali.jalali_month_start(t.date())
+    for _ in range(6):                       # the last 6 (Jalali) months
+        ms = datetime.combine(m_start, datetime.min.time())
+        x = reports.split_usage(db, ms, m_end, [u.id])
+        history.append(dict(x, month=jalali.to_jalali_str(m_start)[:7], total=x["internet"] + x["tunnel"] + x["internal"]))
+        m_end, m_start = ms, jalali.jalali_month_start(m_start - timedelta(days=1))
     stale = t - timedelta(seconds=config.ACCT_INTERIM * 3 + 60)
     online = db.query(AcctSession).filter(AcctSession.user_id == u.id, AcctSession.active.is_(True),
                                           AcctSession.last_update >= stale).all()
@@ -2750,7 +2759,7 @@ def _my_context(db, u):
     period = {"daily": "روزانه", "weekly": "هفتگی", "monthly": "ماهانه"}.get(eff.quota_period, "کل")
     return {"u": u, "eff": eff, "quota": quota, "used": used, "remaining": remaining, "period": period,
             "pct": min(100, round(100 * used / quota)) if quota else 0, "rep": rep, "month": month, "day": day,
-            "online": online, "status": status, "status_kind": kind, "warn": policy.quota_warning(db, u)}
+            "history": history, "online": online, "status": status, "status_kind": kind, "warn": policy.quota_warning(db, u)}
 
 
 WARN_JS = """(function(){var d=document.createElement('div');d.dir='rtl';
@@ -3199,3 +3208,167 @@ def offices_export(request: Request):
     log_action(request, "خروجی Excel گزارش دفاتر", f"{ctx['start']}..{ctx['end']}")
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="offices-{ctx["f"].start.date().isoformat()}.xlsx"'})
+
+
+# ------------------------------------------------------------------ history retention (admin)
+@app.get("/data", response_class=HTMLResponse)
+def data_page(request: Request):
+    db = SessionLocal()
+    months = retention.keep_months(db)
+    return render(request, "data.html", rows=retention.stats(db), groups=retention.GROUPS, months=months,
+                  auto_groups=retention.AUTO_GROUPS, size=retention.db_size(),
+                  auto_before=retention.cutoff(months) if months else None)
+
+
+@app.post("/data/settings")
+async def data_settings(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    try:
+        months = max(0, min(120, int(form.get("months") or 0)))
+    except ValueError:
+        flash(request, "تعداد ماه نادرست است", "err")
+        return redirect("/data")
+    set_setting(db, "history_keep_months", str(months))
+    db.commit()
+    log_action(request, "مدت نگهداری سابقه", f"{months} ماه" if months else "همیشه")
+    flash(request, f"سابقهٔ مصرف {months} ماه نگه داشته می‌شود" if months else "سابقهٔ مصرف خودکار حذف نمی‌شود")
+    return redirect("/data")
+
+
+@app.post("/data/purge")
+async def data_purge(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    day = _date(form.get("before", ""))
+    groups = [g for g in form.getlist("groups") if g in retention.GROUPS]
+    if day is None or not groups:
+        flash(request, "تاریخ و دست‌کم یک نوع داده را انتخاب کنید", "err")
+        return redirect("/data")
+    if day > now().date():
+        flash(request, "تاریخ نمی‌تواند بعد از امروز باشد", "err")
+        return redirect("/data")
+    if form.get("confirm") != "1":
+        flash(request, "تأیید حذف را علامت بزنید", "err")
+        return redirect("/data")
+    before = datetime.combine(day, datetime.min.time())
+    size0 = retention.db_size()
+    n = retention.purge(db, before, groups)
+    try:
+        retention.vacuum()
+    except Exception:
+        logging.getLogger("web").exception("vacuum failed")
+    total = sum(n.values())
+    freed = max(0, size0 - retention.db_size())
+    log_action(request, "حذف سابقه", f"قبل از {jalali.to_jalali_str(day)}: "
+               + "، ".join(retention.GROUPS[g][0] for g in groups) + f" ({total} ردیف)")
+    flash(request, f"{total:,} ردیف قبل از {jalali.to_jalali_str(day)} حذف شد؛ {fmt_bytes(freed)} از حجم پایگاه داده آزاد شد")
+    return redirect("/data")
+
+
+# ------------------------------------------------------------------ RouterOS version / update / reboot
+def _ros_routers(db, ids=None):
+    q = db.query(Nas).filter(Nas.api_user != "").order_by(Nas.name)
+    rows = q.all()
+    return [n for n in rows if ids is None or n.id in ids]
+
+
+@app.get("/routeros", response_class=HTMLResponse)
+def routeros_page(request: Request, check: int = 0):
+    db = SessionLocal()
+    routers = _ros_routers(db)
+    infos = {}
+    if check:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(n):
+            try:
+                return n.id, rosadmin.info(n), ""
+            except Exception as e:
+                return n.id, None, str(e)[:200]
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for nid, inf, err in ex.map(one, routers):
+                infos[nid] = {"info": inf, "error": err}
+    return render(request, "routeros.html", routers=routers, infos=infos, checked=bool(check),
+                  packages=rosadmin.list_npk())
+
+
+@app.post("/routeros/action")
+async def routeros_action(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    action = str(form.get("action", ""))
+    ids = {_int(x) for x in form.getlist("nas")}
+    routers = _ros_routers(db, ids)
+    labels = {"check": "بررسی نسخهٔ جدید", "install": "دانلود و نصب نسخهٔ جدید (ریبوت)", "firmware": "ارتقای فریمور RouterBOARD",
+              "reboot": "ریبوت", "send": "ارسال فایل بروزرسانی"}
+    if action not in labels or not routers:
+        flash(request, "روتر و عملیات را انتخاب کنید", "err")
+        return redirect("/routeros")
+    if action in ("install", "reboot", "firmware", "send") and form.get("confirm") != "1":
+        flash(request, "تأیید عملیات را علامت بزنید", "err")
+        return redirect("/routeros")
+    npk = str(form.get("npk", ""))
+    then_reboot = _bool(form, "reboot_after")
+    ok, bad = [], []
+    for n in routers:
+        try:
+            if action == "check":
+                inf = rosadmin.check_updates(n, str(form.get("channel", "")))
+                ok.append(f"{n.name}: {inf['installed'] or inf['version']} ← {inf['latest'] or '?'} {inf['status']}")
+                continue
+            if action == "install":
+                rosadmin.install_update(n)
+            elif action == "firmware":
+                rosadmin.upgrade_firmware(n)
+                if then_reboot:
+                    rosadmin.reboot(n)
+            elif action == "reboot":
+                rosadmin.reboot(n)
+            elif action == "send":
+                arch = ""
+                try:
+                    arch = rosadmin.info(n)["arch"]
+                except Exception:
+                    pass
+                rosadmin.send_npk(n, npk, arch)
+                if then_reboot:
+                    rosadmin.reboot(n)
+            ok.append(n.name)
+        except Exception as e:
+            bad.append(f"{n.name}: {str(e)[:150]}")
+    detail = labels[action] + (f" {npk}" if action == "send" else "") + (" + ریبوت" if then_reboot and action in ("send", "firmware") else "")
+    log_action(request, "مدیریت روتر", f"{detail}: " + "، ".join([n.name for n in routers]))
+    msg = (f"{labels[action]} انجام شد: " + " | ".join(ok)) if ok else ""
+    if bad:
+        msg += ("\n" if msg else "") + "ناموفق: " + " | ".join(bad)
+    flash(request, msg, "err" if bad else "ok")
+    return redirect("/routeros?check=1" if action == "check" else "/routeros")
+
+
+@app.post("/routeros/upload")
+async def routeros_upload(request: Request):
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not getattr(up, "filename", ""):
+        flash(request, "فایل را انتخاب کنید", "err")
+        return redirect("/routeros")
+    try:
+        name = rosadmin.save_npk(up.filename, await up.read())
+    except ValueError as e:
+        flash(request, str(e), "err")
+        return redirect("/routeros")
+    log_action(request, "بارگذاری بستهٔ میکروتیک", name)
+    flash(request, f"فایل {name} بارگذاری شد؛ حالا آن را برای روترها بفرستید")
+    return redirect("/routeros")
+
+
+@app.post("/routeros/delete-npk")
+async def routeros_delete_npk(request: Request):
+    form = await request.form()
+    try:
+        rosadmin.delete_npk(str(form.get("npk", "")))
+        log_action(request, "حذف بستهٔ میکروتیک", str(form.get("npk", "")))
+    except ValueError as e:
+        flash(request, str(e), "err")
+    return redirect("/routeros")

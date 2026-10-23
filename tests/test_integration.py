@@ -2087,3 +2087,118 @@ def test_office_report_by_device_and_network_objects(env):
     db.close()
     netscope.scope.refresh(force=True)
     netobjects.index.refresh(force=True)
+
+
+def test_history_retention_purge_and_routeros_update(env, monkeypatch, tmp_path):
+    from datetime import timedelta
+
+    from app import hotspot, retention, rosadmin, routeros, web
+    from app.db import AcctSession, AuditLog, SpeedSample, User, now, set_setting
+    from app.web import app
+    from tests.fake_ros import FakeRouter
+    db = SessionLocal()
+    g_total = Group(name="ret-total", quota_mb=1000, quota_period="total")
+    db.add(g_total)
+    db.flush()
+    keep_u = User(username="ret.total", source="local", group_id=g_total.id)
+    u = User(username="ret.user", source="local")
+    db.add_all([keep_u, u])
+    db.flush()
+    t = now()
+    old, mid = t - timedelta(days=250), t - timedelta(days=100)
+    for usr in (u, keep_u):
+        for ts in (old, mid):
+            s = AcctSession(acct_session_id=f"r{usr.id}-{ts.toordinal()}", nas_ip="10.9.9.9", username=usr.username,
+                            user_id=usr.id, start_time=ts, stop_time=ts, active=False)
+            db.add(s)
+            db.flush()
+            db.add(SpeedSample(session_id=s.id, user_id=usr.id, ts=ts, seconds=60, d_in=1000, d_out=5000))
+    set_setting(db, "history_keep_months", "6")
+    db.commit()
+    assert retention.keep_months(db) == 6
+    retention.auto(db)                                   # older than 6 months goes, except the "total" quota user
+    q = lambda uid: db.query(SpeedSample).filter(SpeedSample.user_id == uid).count()   # noqa: E731
+    assert q(u.id) == 1 and q(keep_u.id) == 2
+    assert db.query(AcctSession).filter(AcctSession.user_id == u.id).count() == 1
+    ctx = web._my_context(db, u)
+    assert len(ctx["history"]) == 6 and all("total" in m for m in ctx["history"])
+    uid, kid = u.id, keep_u.id
+    db.close()
+
+    fake = FakeRouter()
+    fake.store["system/resource"] = [{"version": "7.15.3 (stable)", "architecture-name": "arm64", "board-name": "RB5009",
+                                      "uptime": "3d4h", "cpu-load": "4", "free-memory": "800000000",
+                                      "total-memory": "1000000000", "free-hdd-space": "900000000",
+                                      "total-hdd-space": "1000000000"}]
+    fake.store["system/routerboard"] = [{"routerboard": "true", "model": "RB5009UG+S+", "current-firmware": "7.15.3",
+                                         "upgrade-firmware": "7.16"}]
+    fake.store["system/package/update"] = [{".id": "*0", "channel": "stable", "installed-version": "7.15.3",
+                                            "latest-version": "7.16.2", "status": "New version is available"}]
+    fake.store["system/package"] = [{".id": "*1", "name": "routeros", "version": "7.15.3"}]
+    monkeypatch.setattr(routeros, "api", fake.conn)
+    sent = {}
+
+    class Tr:
+        def put(self, path, data):
+            sent[path] = data
+
+        def close(self):
+            pass
+    monkeypatch.setattr(hotspot, "transfer", lambda nas: Tr())
+    monkeypatch.setattr(rosadmin, "NPK_DIR", str(tmp_path / "npk"))
+    db = SessionLocal()
+    nas = Nas(name="ros-upd", ip="10.66.0.1", secret="s", api_user="api")
+    db.add(nas)
+    db.commit()
+    nid = nas.id
+    db.close()
+    npk = b"\x1e\xf1\xd0\xba" + b"x" * 100
+    with TestClient(app) as c:
+        _login(c, "admin", "Secret12345")
+        r = c.get("/data")
+        assert r.status_code == 200 and "نگهداری سابقه" in r.text and "نمونه‌های مصرف" in r.text
+        r = c.get("/routeros?check=1")
+        assert r.status_code == 200 and "7.15.3" in r.text and "7.16.2" in r.text and "RB5009UG+S+" in r.text
+        assert "arm64" in r.text
+        # upload: wrong name / not a package / ok
+        c.post("/routeros/upload", files={"file": ("evil.exe", b"MZ", "application/octet-stream")})
+        c.post("/routeros/upload", files={"file": ("routeros-7.16.2-arm64.npk", b"not a npk", "application/octet-stream")})
+        assert rosadmin.list_npk() == []
+        c.post("/routeros/upload", files={"file": ("routeros-7.16.2-arm64.npk", npk, "application/octet-stream")})
+        c.post("/routeros/upload", files={"file": ("routeros-7.16.2-mipsbe.npk", npk, "application/octet-stream")})
+        assert [p["arch"] for p in rosadmin.list_npk()] == ["arm64", "mipsbe"]
+        # without confirmation nothing happens
+        c.post("/routeros/action", data={"action": "reboot", "nas": nid})
+        assert not any(cmd == "/system/reboot" for cmd, _ in fake.calls)
+        c.post("/routeros/action", data={"action": "send", "nas": nid, "npk": "routeros-7.16.2-mipsbe.npk", "confirm": "1"})
+        assert sent == {}                                    # architecture differs
+        c.post("/routeros/action", data={"action": "send", "nas": nid, "npk": "routeros-7.16.2-arm64.npk",
+                                         "confirm": "1", "reboot_after": "1"})
+        assert sent == {"routeros-7.16.2-arm64.npk": npk}
+        assert any(cmd == "/system/reboot" for cmd, _ in fake.calls)
+        c.post("/routeros/action", data={"action": "check", "nas": nid, "channel": "long-term"})
+        assert ("/system/package/update/set", {"channel": "long-term"}) in fake.calls
+        assert any(cmd == "/system/package/update/check-for-updates" for cmd, _ in fake.calls)
+        c.post("/routeros/action", data={"action": "install", "nas": nid, "confirm": "1"})
+        c.post("/routeros/action", data={"action": "firmware", "nas": nid, "confirm": "1"})
+        assert any(cmd == "/system/package/update/install" for cmd, _ in fake.calls)
+        assert any(cmd == "/system/routerboard/upgrade" for cmd, _ in fake.calls)
+        c.post("/routeros/delete-npk", data={"npk": "routeros-7.16.2-mipsbe.npk"})
+        assert [p["name"] for p in rosadmin.list_npk()] == ["routeros-7.16.2-arm64.npk"]
+        # manual purge before a date
+        c.post("/data/settings", data={"months": "12"})
+        day = (now() - timedelta(days=50)).date()
+        from app import jalali
+        r = c.post("/data/purge", data={"before": jalali.to_jalali_str(day), "groups": ["usage"]})
+        db = SessionLocal()
+        assert db.query(SpeedSample).filter(SpeedSample.user_id == uid).count() == 1     # not confirmed
+        c.post("/data/purge", data={"before": jalali.to_jalali_str(day), "groups": ["usage"], "confirm": "1"})
+        assert db.query(SpeedSample).filter(SpeedSample.user_id == uid).count() == 0
+        assert db.query(SpeedSample).filter(SpeedSample.user_id == kid).count() == 2     # "total" quota kept
+        assert retention.keep_months(db) == 12
+        assert db.query(AuditLog).filter(AuditLog.action == "حذف سابقه").count() == 1
+        db.close()
+    db = SessionLocal()
+    db.delete(db.get(Nas, nid))
+    db.commit()
+    db.close()

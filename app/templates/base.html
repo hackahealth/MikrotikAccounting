@@ -34,8 +34,10 @@
   {% if 'pbx_manage' in perms %}<a href="/pbx" data-tour="pbx" class="{{ 'on' if p.startswith('/pbx') }}">سرورهای ایزابل</a>{% endif %}
   {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>
   <a href="/netobjects" class="{{ 'on' if p.startswith('/netobjects') }}">سرورها و دستگاه‌های شبکه</a>{% endif %}
+  {% if 'router_admin' in perms %}<a href="/routeros" class="{{ 'on' if p.startswith('/routeros') }}">نسخه و بروزرسانی روترها</a>{% endif %}
   {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') }}">Active Directory</a>{% endif %}
   {% if 'panel_users' in perms %}<a href="/admins" data-tour="admins" class="{{ 'on' if p.startswith('/admins') }}">کاربران پنل</a>{% endif %}
+  {% if 'data_manage' in perms %}<a href="/data" class="{{ 'on' if p.startswith('/data') }}">نگهداری سابقه</a>{% endif %}
   {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}
   {% if me %}<div class="me"><a href="/account" data-tour="account" class="{{ 'on' if p.startswith('/account') }}">{{ me.full_name or me.username }}<span>{{ ROLES[me.role][0] }}</span></a>
   {% if me.user_id %}<a href="/my" data-tour="my">مصرف اینترنت من</a>{% endif %}
@@ -45,7 +47,7 @@
 </nav>
 <main class="main">
 {% if scope_label %}<div class="scope-bar">فقط مشاهده — محدوده دسترسی شما: {{ scope_label }}</div>{% endif %}
-{% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
+{% if flash %}<div class="flash {{ flash.kind }}" style="white-space:pre-line">{{ flash.msg }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>
 </div>

@@ -4,7 +4,7 @@
 <div><a class="btn p" href="/offices/export.xlsx?{{ qs }}">دانلود Excel</a> <button class="btn" onclick="window.print()">چاپ / PDF</button></div></div>
 <div class="card"><form class="filters" method="get">
   <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
-    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر')] %}
+    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر'),('180d','۶ ماه اخیر')] %}
     <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'month' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
   <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>

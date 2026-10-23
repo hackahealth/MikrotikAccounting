@@ -12,7 +12,7 @@
 <div class="card">
 <form class="filters" method="get">
   <div><label>بازه آماده</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
-    {% for k, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('30d','۳۰ روز اخیر')] %}
+    {% for k, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر'),('180d','۶ ماه اخیر')] %}
     <option value="{{ k }}" {{ 'selected' if request.query_params.get('preset') == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
   <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>

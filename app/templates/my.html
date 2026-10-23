@@ -23,6 +23,10 @@
     <div class="hint">اینترنت <span class="ltr">{{ month.internet|bytes }}</span> · تانل <span class="ltr">{{ month.tunnel|bytes }}</span> · داخل شبکه <span class="ltr">{{ month.internal|bytes }}</span></div></div>
 </div>
 
+<div class="card tbl"><h3>مصرف ماه‌های اخیر</h3><table><tr><th>ماه</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>مجموع</th></tr>
+{% for m in history %}<tr><td class="ltr">{{ m.month|fa }}</td><td class="ltr">{{ m.internet|bytes }}</td><td class="ltr">{{ m.tunnel|bytes }}</td><td class="ltr">{{ m.internal|bytes }}</td><td class="ltr"><b>{{ m.total|bytes }}</b></td></tr>{% endfor %}
+</table></div>
+
 <div class="grid g2">
   <div class="card" data-tour="daily"><h3>مصرف روزانه (۳۰ روز اخیر)</h3><div class="chart"><canvas id="daily"></canvas></div>
     <div class="tbl" style="max-height:260px;overflow:auto;margin-top:10px"><table><tr><th>تاریخ</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>مجموع</th></tr>

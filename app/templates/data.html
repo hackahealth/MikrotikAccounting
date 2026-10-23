@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>نگهداری سابقه</h2></div>
+<p class="hint">حجم فعلی پایگاه داده: <b class="ltr">{{ size|bytes }}</b></p>
+
+<div class="card"><h3>مدت نگهداری خودکار</h3>
+<form class="filters" method="post" action="/data/settings">
+  <div><label>سابقهٔ مصرف و ترافیک روترها چند ماه نگه داشته شود؟ (۰ = همیشه)</label>
+  <input name="months" type="number" min="0" max="120" class="ltr" value="{{ months }}" style="width:100px"></div>
+  <div><button class="btn">ذخیره</button></div>
+</form>
+<p class="hint">{% if months %}هر شب، {{ groups['usage'][0] }} و {{ groups['routers'][0] }} قدیمی‌تر از {{ months|fa }} ماه (قبل از {{ auto_before|jdate }}) حذف می‌شود.{% else %}هیچ سابقه‌ای خودکار حذف نمی‌شود.{% endif %}
+سابقهٔ کاربرانی که سقف حجمشان «کل» است (بدون دوره) حذف نمی‌شود، چون مصرفشان از همین سابقه حساب می‌شود.</p></div>
+
+<div class="card"><h3>حذف دستی سابقه قبل از یک تاریخ</h3>
+<form method="post" action="/data/purge" onsubmit="return confirm('داده‌های انتخاب‌شده قبل از این تاریخ برای همیشه حذف می‌شوند. ادامه می‌دهید؟')">
+  <div class="filters"><div><label>حذف همهٔ داده‌های قبل از (شمسی)</label><input name="before" class="ltr" placeholder="1405/02/01" required></div></div>
+  <div style="margin:8px 0">{% for g, (title, _) in groups.items() %}
+    <label style="display:block;margin:4px 0"><input type="checkbox" name="groups" value="{{ g }}" {{ 'checked' if g in auto_groups }}> {{ title }}</label>{% endfor %}</div>
+  <label style="display:block;margin:8px 0"><input type="checkbox" name="confirm" value="1"> می‌دانم داده‌های حذف‌شده برنمی‌گردند</label>
+  <button class="btn d">حذف</button>
+  <p class="hint">پیش از حذف، از پوشهٔ data نسخهٔ پشتیبان بگیرید. بعد از حذف، فضای آزادشده به دیسک برگردانده می‌شود (ممکن است چند دقیقه طول بکشد).</p>
+</form></div>
+
+<div class="card tbl"><table>
+<tr><th>نوع داده</th><th>جدول</th><th>تعداد ردیف</th><th>قدیمی‌ترین</th></tr>
+{% for r in rows %}<tr><td>{{ r.group_fa }}</td><td>{{ r.name }}</td><td class="ltr">{{ '{:,}'.format(r.count) }}</td><td>{{ r.oldest|jdate if r.oldest else '-' }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -7,7 +7,7 @@
 {% if not servers %}<div class="card"><p>هنوز سرور ایزابلی تعریف نشده است.{% if 'pbx_manage' in perms %} <a class="btn s" href="/pbx/new">افزودن سرور ایزابل</a>{% else %} از مدیر سیستم بخواهید سرور ایزابل را در برنامه تعریف کند.{% endif %}</p></div>{% endif %}
 <div class="card"><form class="filters" method="get">
   <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
-    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر')] %}
+    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر'),('180d','۶ ماه اخیر')] %}
     <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'today' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
   <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>

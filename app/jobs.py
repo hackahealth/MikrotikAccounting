@@ -4,9 +4,9 @@ import threading
 import time
 from datetime import timedelta
 
-from . import (apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor, netobjects,
-               netscope, nightlist, pbx, policy, routeros, security)
-from .db import AcctSession, Nas, SessionLocal, SpeedSample, User, get_setting, now
+from . import (apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
+               netscope, nightlist, pbx, policy, retention, routeros, security)
+from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
 log = logging.getLogger("jobs")
 
@@ -221,11 +221,9 @@ def ldap_job():
 def cleanup():
     db = SessionLocal()
     try:
-        limit = now() - timedelta(days=config.SAMPLE_RETENTION_DAYS)
-        db.query(SpeedSample).filter(SpeedSample.ts < limit).delete()
         ifstats.cleanup(db, config.IFACE_SAMPLE_DAYS)
-        netobjects.cleanup(db, config.SAMPLE_RETENTION_DAYS)
         db.commit()
+        retention.auto(db)
     finally:
         db.close()
         SessionLocal.remove()

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>نسخه و بروزرسانی روترها</h2>
+<div><a class="btn" href="/routeros?check=1">خواندن نسخه از روترها</a></div></div>
+<p class="hint">نسخه، مدل و وضعیت هر روتر از راه API خوانده می‌شود. عملیات‌ها روی روترهای علامت‌خورده انجام می‌شود و همه در «لاگ فعالیت پنل» ثبت می‌شوند.</p>
+
+<form method="post" action="/routeros/action" id="act">
+<div class="card tbl"><table>
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('input[name=nas]').forEach(c=>c.checked=this.checked)"></th>
+<th>روتر</th><th>مدل / معماری</th><th>نسخهٔ RouterOS</th><th>آخرین نسخه</th><th>فریمور</th><th>uptime</th><th>CPU / حافظه / دیسک</th><th>بسته‌ها</th></tr>
+{% for n in routers %}{% set x = infos.get(n.id) %}{% set i = x.info if x else None %}
+<tr><td><input type="checkbox" name="nas" value="{{ n.id }}"></td><td><b>{{ n.name }}</b><div class="hint ltr">{{ n.api_host or n.ip }}</div></td>
+{% if i %}
+<td>{{ i.model or i.board }}<div class="hint ltr">{{ i.arch }}</div></td>
+<td class="ltr"><b>{{ i.version }}</b>{% if i.channel %}<div class="hint">{{ i.channel }}</div>{% endif %}</td>
+<td class="ltr">{% if i.latest and i.latest != i.installed %}<span class="badge warn">{{ i.latest }}</span>{% elif i.latest %}<span class="badge ok">به‌روز</span>{% else %}-{% endif %}<div class="hint">{{ i.status }}</div></td>
+<td class="ltr">{% if i.routerboard %}{{ i.fw_current }}{% if i.fw_upgrade and i.fw_upgrade != i.fw_current %} <span class="badge warn">{{ i.fw_upgrade }}</span>{% endif %}{% else %}-{% endif %}</td>
+<td class="ltr">{{ i.uptime }}</td>
+<td class="ltr">{{ i.cpu }}% · {{ i.free_mem|bytes }} / {{ i.total_mem|bytes }} · {{ i.free_hdd|bytes }} / {{ i.total_hdd|bytes }}</td>
+<td class="ltr wrap" style="max-width:220px">{% for p in i.packages %}{{ p.name }}{% if p.disabled %} (off){% endif %}{% if p.scheduled %} <span class="badge warn">{{ p.scheduled }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}</td>
+{% elif x %}<td colspan="7"><span class="badge err">در دسترس نیست</span> <span class="hint">{{ x.error }}</span></td>
+{% else %}<td colspan="7" class="muted">برای دیدن نسخه «خواندن نسخه از روترها» را بزنید</td>{% endif %}</tr>
+{% else %}<tr><td colspan="9" class="muted">روتری با API تعریف نشده</td></tr>{% endfor %}
+</table></div>
+
+<div class="card"><h3>عملیات روی روترهای انتخاب‌شده</h3>
+<div class="filters">
+  <div><label>عملیات</label><select name="action" id="action" onchange="document.getElementById('npkbox').style.display=this.value=='send'?'':'none'">
+    <option value="check">بررسی نسخهٔ جدید (از سرور میکروتیک)</option>
+    <option value="install">دانلود و نصب نسخهٔ جدید از سرور میکروتیک (روتر ریبوت می‌شود)</option>
+    <option value="send">ارسال فایل بروزرسانی از همین سامانه</option>
+    <option value="firmware">ارتقای فریمور RouterBOARD</option>
+    <option value="reboot">ریبوت</option></select></div>
+  <div><label>کانال (برای بررسی)</label><select name="channel"><option value="">بدون تغییر</option><option value="stable">stable</option><option value="long-term">long-term</option><option value="testing">testing</option></select></div>
+  <div id="npkbox" style="display:none"><label>فایل</label><select name="npk">{% for p in packages %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}</select></div>
+</div>
+<label style="display:block;margin:6px 0"><input type="checkbox" name="reboot_after" value="1"> بعد از ارسال فایل / ارتقای فریمور، روتر ریبوت شود (نصب با ریبوت انجام می‌شود)</label>
+<label style="display:block;margin:6px 0"><input type="checkbox" name="confirm" value="1"> تأیید می‌کنم (نصب و ریبوت اتصال کاربران همان دفتر را چند دقیقه قطع می‌کند)</label>
+<button class="btn">اجرا</button>
+<p class="hint">«دانلود و نصب» فقط وقتی کار می‌کند که روتر به سرورهای میکروتیک دسترسی داشته باشد. در غیر این صورت فایل .npk مناسب معماری روتر را پایین بارگذاری کنید و با «ارسال فایل بروزرسانی» بفرستید؛ فایل با FTP/SFTP تنظیم‌شده در فرم روتر به ریشهٔ فایل‌های روتر کپی می‌شود و با ریبوت نصب می‌شود. معماری فایل با روتر مقایسه می‌شود.</p>
+</div>
+</form>
+
+<div class="card"><h3>فایل‌های بروزرسانی (npk)</h3>
+<form method="post" action="/routeros/upload" enctype="multipart/form-data" class="filters">
+  <div><label>بارگذاری فایل .npk (مثلاً routeros-7.16.2-arm64.npk)</label><input type="file" name="file" accept=".npk"></div>
+  <div><button class="btn">بارگذاری</button></div></form>
+<div class="tbl"><table><tr><th>فایل</th><th>نسخه</th><th>معماری</th><th>حجم</th><th></th></tr>
+{% for p in packages %}<tr><td class="ltr">{{ p.name }}</td><td class="ltr">{{ p.version }}</td><td class="ltr">{{ p.arch or '-' }}</td><td class="ltr">{{ p.size|bytes }}</td>
+<td><form class="inline" method="post" action="/routeros/delete-npk" onsubmit="return confirm('حذف شود؟')"><input type="hidden" name="npk" value="{{ p.name }}"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="muted">فایلی بارگذاری نشده</td></tr>{% endfor %}</table></div></div>
+{% endblock %}
