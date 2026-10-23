@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>گروه‌ها</h2>{% if 'groups_edit' in perms %}<a class="btn p" href="/groups/new">+ گروه جدید</a>{% endif %}</div>
+<div class="card tbl"><table>
+<tr><th>نام</th><th>تعداد کاربر</th><th>سرعت</th><th>سهمیه</th><th>ساعات مجاز</th><th>همزمان</th><th>سرویس‌ها</th><th>گروه AD</th><th></th></tr>
+{% for g in groups %}
+<tr><td>{% if 'reports_view' in perms %}<a href="/reports?preset=month&group_id={{ g.id }}">{{ g.name }}</a>{% else %}{{ g.name }}{% endif %}<div class="hint">{{ g.description }}</div></td>
+<td><a href="/users?group={{ g.id }}">{{ counts.get(g.id, 0) }}</a></td>
+<td class="ltr">{{ g.rate_limit or 'نامحدود' }}</td>
+<td>{% if g.quota_mb %}<span class="ltr">{{ (g.quota_mb * 1048576)|bytes }}</span> {{ {'daily':'روزانه','weekly':'هفتگی','monthly':'ماهانه','total':'کل'}[g.quota_period] }}{% else %}نامحدود{% endif %}</td>
+<td class="hours">{% if g.allowed_hours %}{% for part in g.allowed_hours.split(';') %}{{ part.strip() }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}همیشه{% endif %}</td><td>{{ g.simultaneous_use or 'نامحدود' }}</td>
+<td>{{ 'هات‌اسپات' if g.allow_hotspot }} {{ 'VPN' if g.allow_vpn }}</td>
+<td class="ltr wrap hint">{{ g.ldap_group_dn }}</td>
+<td>{% if 'groups_edit' in perms %}<a class="btn s" href="/groups/{{ g.id }}/edit">ویرایش</a>
+<form class="inline" method="post" action="/groups/{{ g.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form>{% endif %}</td></tr>
+{% endfor %}
+</table></div>
+{% endblock %}

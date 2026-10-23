@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>داشبورد امروز</h2>{% if 'reports_view' in perms %}<a class="btn" href="/reports?preset=today">گزارش کامل امروز</a>{% endif %}</div>
+<div class="grid g4">
+  <div class="card stat"><div class="l">کاربران آنلاین</div><div class="v">{{ stats.active }}</div>
+    <div class="hint">هات‌اسپات {{ stats.hotspot }} · VPN {{ stats.vpn }}</div></div>
+  <div class="card stat"><div class="l">مصرف امروز</div><div class="v ltr">{{ rep.total|bytes }}</div>
+    <div class="hint">اینترنت <span class="ltr">{{ rep.split.internet|bytes }}</span> · تانل <span class="ltr">{{ rep.split.tunnel|bytes }}</span> · داخل شبکه <span class="ltr">{{ rep.split.internal|bytes }}</span></div>
+    <div class="hint">دانلود <span class="ltr">{{ rep.down|bytes }}</span> · آپلود <span class="ltr">{{ rep.up|bytes }}</span></div></div>
+  <div class="card stat"><div class="l">کاربران</div><div class="v">{{ stats.users }}</div>
+    <div class="hint">فعال {{ stats.enabled }} · امروز وصل‌شده {{ rep.user_count }}</div></div>
+  <div class="card stat"><div class="l">ورود ناموفق امروز</div><div class="v">{{ stats.rejects }}</div>
+    <div class="hint">{% if 'logs_view' in perms %}<a href="/logs?result=reject">مشاهده لاگ</a>{% endif %}</div></div>
+</div>
+<div class="grid g2">
+  <div class="card"><h3>مصرف ساعتی امروز</h3><div class="chart"><canvas id="hourly"></canvas></div></div>
+  <div class="card"><h3>نوع استفاده امروز</h3>
+    {% if rep.categories %}<div class="chart"><canvas id="cats"></canvas></div>
+    {% else %}<p class="muted">هنوز داده‌ای از Traffic-Flow دریافت نشده. بخش «راه‌اندازی میکروتیک» در README را ببینید.</p>{% endif %}
+  </div>
+</div>
+<div class="grid g2">
+  <div class="card"><h3>پرمصرف‌ترین کاربران امروز</h3>
+    <div class="tbl"><table><tr><th>کاربر</th><th>گروه</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>مجموع</th><th>مدت آنلاین</th></tr>
+    {% for u in rep.users[:10] %}
+      <tr><td>{% if 'reports_view' in perms %}<a href="/reports?preset=today&user_id={{ u.user_id }}">{{ u.username }}</a>{% else %}{{ u.username }}{% endif %}</td><td>{{ u.group }}</td>
+      <td class="ltr">{{ u.internet|bytes }}</td><td class="ltr">{{ u.tunnel|bytes }}</td><td class="ltr">{{ u.internal|bytes }}</td><td class="ltr">{{ u.total|bytes }}</td><td>{{ u.online|duration }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">داده‌ای نیست</td></tr>{% endfor %}
+    </table></div></div>
+  <div class="card"><h3>دستگاه‌های آنلاین</h3>
+    <div class="tbl"><table><tr><th>نوع دستگاه</th><th>تعداد</th></tr>
+    {% for k, v in by_dev.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">کسی آنلاین نیست</td></tr>{% endfor %}</table></div>
+    {% if 'nas_manage' in perms %}<h3 style="margin-top:16px">وضعیت روترها</h3>
+    <div class="tbl"><table><tr><th>روتر</th><th>IP</th><th>آخرین بسته RADIUS</th><th>API</th></tr>
+    {% for n in nas %}<tr><td>{{ n.name }}</td><td class="ltr">{{ n.ip }}</td><td>{{ n.last_seen|jdt }}</td>
+      <td>{{ routers.get(n.name, 'تنظیم نشده' if not n.api_user else 'در انتظار') }}</td></tr>
+    {% else %}<tr><td colspan="4"><a href="/nas">یک روتر اضافه کنید</a></td></tr>{% endfor %}</table></div>{% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const H = {{ rep.hourly|tojson }};
+new Chart(document.getElementById('hourly'), {type:'bar', data:{labels:[...Array(24).keys()].map(h=>h+':00'),
+  datasets:[{label:'دانلود',data:H.map(x=>x[1]),backgroundColor:PALETTE[0]},{label:'آپلود',data:H.map(x=>x[0]),backgroundColor:PALETTE[1]}]},
+  options:{maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:v=>fmtBytes(v)}}},
+  plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtBytes(c.raw)}}}}});
+{% if rep.categories %}
+const C = {{ rep.categories|tojson }};
+new Chart(document.getElementById('cats'), {type:'doughnut', data:{labels:C.map(c=>c.name),
+  datasets:[{data:C.map(c=>c.down+c.up),backgroundColor:PALETTE}]},
+  options:{maintainAspectRatio:false,plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>c.label+': '+fmtBytes(c.raw)}}}}});
+{% endif %}
+</script>
+{% endblock %}

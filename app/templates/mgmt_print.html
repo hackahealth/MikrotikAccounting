@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>گزارش مدیریتی {{ start }} تا {{ end }}</title>
+<link rel="stylesheet" href="/static/style.css"><script src="/static/chart.umd.js"></script>
+<style>
+:root{--bg:#fff;--card:#fff;--text:#111;--muted:#555;--line:#d5dbe5}
+body{background:#fff;color:#111;font-size:12px}
+.page{max-width:1000px;margin:0 auto;padding:18px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1f3a68;padding-bottom:8px;margin-bottom:14px}
+.head h1{margin:0;font-size:20px;color:#1f3a68}
+.card{padding:10px 12px;margin-bottom:10px}.grid{gap:10px}.chart{height:200px}
+th,td{padding:4px 6px}
+.bar-print{margin:10px 0}
+@page{size:A4;margin:12mm}
+@media print{.bar-print{display:none}}
+</style></head>
+<body><div class="page">
+<div class="bar-print"><button class="btn p" onclick="window.print()">چاپ / ذخیره PDF</button> <span class="hint">در پنجره چاپ، مقصد را «Save as PDF» انتخاب کنید.</span></div>
+<div class="head"><div><h1>گزارش مدیریتی مصرف اینترنت</h1>
+<div>دوره: {{ start }} تا {{ end }}{{ ' · ' ~ caption if caption }}</div></div>
+<div class="hint">تهیه‌شده در {{ generated|jdt }} توسط {{ me.full_name or me.username }}</div></div>
+{% set printing = true %}
+{% include "_mgmt_body.html" %}
+<p class="hint">ساعات کاری: <span class="ltr">{{ rep.work_hours }}</span> · «تفریحی» شامل فیلم، موسیقی، شبکه‌های اجتماعی و بازی است و از Traffic-Flow روتر محاسبه می‌شود.</p>
+</div>
+<script>
+Chart.defaults.font.family='Vazirmatn, Tahoma, sans-serif';
+const PALETTE=['#2563eb','#16a34a','#ea580c','#9333ea','#0891b2','#dc2626','#ca8a04','#db2777','#4f46e5','#65a30d','#0d9488','#7c3aed','#be123c','#475569','#a16207','#64748b'];
+function fmtBytes(n){const u=['B','KB','MB','GB','TB'];let i=0;n=+n||0;while(n>=1024&&i<4){n/=1024;i++}return (i?n.toFixed(2):n)+' '+u[i]}
+</script>
+{% include "_mgmt_charts.html" %}
+<script>document.fonts.ready.then(()=>setTimeout(()=>window.print(),700));</script>
+</body></html>

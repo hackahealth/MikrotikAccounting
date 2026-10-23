@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top noprint"><h2>{{ added }} مورد در {{ titles[kind] }} روی {{ nas.name }} ساخته شد</h2>
+<div><button class="btn p" onclick="window.print()">چاپ کارت‌ها</button> <a class="btn" href="#" onclick="dl();return false">دانلود CSV</a>
+<a class="btn" href="/mt-local?nas_id={{ nas.id }}&tab={{ kind }}">بازگشت</a></div></div>
+{% if errors %}<div class="flash err noprint">{{ errors|length }} مورد ساخته نشد: {{ errors[:20]|join('، ') }}</div>{% endif %}
+<div class="vouchers">
+{% for it in items %}<div class="voucher"><div class="vt">{{ nas.name }}{{ ' · ' ~ profile if profile }}</div>
+<div>نام کاربری: <b class="ltr">{{ it.name }}</b></div><div>رمز: <b class="ltr">{{ it.password }}</b></div>
+{% if limit_uptime or limit_total %}<div class="hint">{{ ('زمان: ' ~ limit_uptime) if limit_uptime }} {{ ('حجم: ' ~ (limit_total|bytes)) if limit_total }}</div>{% endif %}
+{% if it.comment %}<div class="hint">{{ it.comment }}</div>{% endif %}</div>{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const ROWS = {{ items|map(attribute='name')|list|tojson }}, PWS = {{ items|map(attribute='password')|list|tojson }};
+function dl(){ let s = '﻿username,password\n'; ROWS.forEach((r,i)=> s += r + ',' + PWS[i] + '\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([s], {type:'text/csv'})); a.download = 'accounts.csv'; a.click(); }
+</script>
+{% endblock %}

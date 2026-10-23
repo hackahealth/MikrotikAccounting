@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_macros.html" import org_filters %}
+{% block content %}
+<div class="top"><h2>گزارش مدیریتی <span class="hint">{{ start }} تا {{ end }}{{ ' · ' ~ caption if caption }}</span></h2>
+<div><a class="btn p" href="/mgmt/export.xlsx?{{ qs }}">دانلود Excel</a> <a class="btn" target="_blank" href="/mgmt/print?{{ qs }}">چاپ / ذخیره PDF</a></div></div>
+<div class="card"><form class="filters" method="get">
+  <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
+    {% for key, v in [('month','این ماه'),('lastmonth','ماه قبل'),('week','این هفته'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر')] %}
+    <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'month' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>
+{{ org_filters(f, offices, departments, groups) }}
+  <div><button class="btn p" onclick="this.form.preset.value=''">نمایش</button></div>
+</form></div>
+{% set printing = false %}
+{% include "_mgmt_body.html" %}
+{% if 'settings' in perms %}
+<div class="card"><h3>ساعات کاری سازمان</h3>
+<form method="post" action="/settings" class="filters"><input type="hidden" name="back" value="/mgmt?{{ qs }}">
+  <div style="flex:1;min-width:260px"><label>برای تفکیک «داخل / خارج از ساعات کاری» در گزارش‌ها</label><input name="work_hours" class="ltr" value="{{ rep.work_hours }}"></div>
+  <div><button class="btn">ذخیره</button></div></form></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% set printing = false %}{% include "_mgmt_charts.html" %}{% endblock %}

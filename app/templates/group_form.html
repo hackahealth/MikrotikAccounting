@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import quota_fields, period_select, hours_help, rate_help %}
+{% block content %}
+<div class="top"><h2>{{ 'ویرایش گروه ' ~ g.name if g else 'گروه جدید' }}</h2><a class="btn" href="/groups">بازگشت</a></div>
+<form method="post" action="/groups/save">
+<input type="hidden" name="id" value="{{ g.id if g else '' }}">
+<div class="grid g2">
+<div class="card"><h3>مشخصات</h3>
+  <div class="fg"><label>نام گروه</label><input name="name" value="{{ g.name if g else '' }}"></div>
+  <div class="fg"><label>توضیح</label><input name="description" value="{{ g.description if g else '' }}"></div>
+  <div class="fg"><label><input type="checkbox" name="allow_hotspot" value="1" {{ 'checked' if not g or g.allow_hotspot }}> مجاز به هات‌اسپات</label></div>
+  <div class="fg"><label><input type="checkbox" name="allow_vpn" value="1" {{ 'checked' if not g or g.allow_vpn }}> مجاز به VPN</label></div>
+  <div class="fg"><label>DN گروه Active Directory (اعضای این گروه AD به این گروه منتقل می‌شوند)</label>
+    <input name="ldap_group_dn" class="ltr" value="{{ g.ldap_group_dn if g else '' }}" placeholder="CN=Internet-Users,OU=Groups,DC=corp,DC=local"></div>
+  <div class="fg"><label>Address-List میکروتیک (برای فایروال/مسیر جداگانه)</label><input name="address_list" class="ltr" value="{{ g.address_list if g else '' }}"></div>
+</div>
+<div class="card"><h3>محدودیت‌ها</h3>
+  <div class="fg"><label>سرعت</label><input name="rate_limit" class="ltr" value="{{ g.rate_limit if g else '' }}">{{ rate_help() }}</div>
+  {{ quota_fields(g.quota_mb if g else 0, false) }}
+  <div class="fg"><label>دوره سهمیه</label>{{ period_select(g.quota_period if g else 'monthly', false) }}</div>
+  <div class="fg"><label>ساعات مجاز اتصال</label><input name="allowed_hours" value="{{ g.allowed_hours if g else '' }}">{{ hours_help() }}</div>
+  <div class="grid g3">
+    <div class="fg"><label>اتصال همزمان (۰ = نامحدود)</label><input name="simultaneous_use" class="ltr" value="{{ g.simultaneous_use if g else 1 }}"></div>
+    <div class="fg"><label>حداکثر مدت هر اتصال (دقیقه)</label><input name="session_timeout_min" class="ltr" value="{{ g.session_timeout_min if g else 0 }}"></div>
+    <div class="fg"><label>قطع در صورت بیکاری (دقیقه)</label><input name="idle_timeout_min" class="ltr" value="{{ g.idle_timeout_min if g else 0 }}"></div>
+  </div>
+</div>
+</div>
+<button class="btn p">ذخیره</button>
+</form>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>سرورهای ایزابل</h2>{% if not edit %}<a class="btn p" href="/pbx/new">افزودن سرور</a>{% endif %}</div>
+<div class="card tbl"><table>
+<tr><th>نام</th><th>آدرس</th><th>داخلی‌ها</th><th>ترانک‌ها</th><th>تماس ثبت‌شده</th><th>آخرین خواندن</th><th>وضعیت</th><th></th></tr>
+{% for s in servers %}<tr><td>{{ s.name }}{% if not s.enabled %} <span class="badge warn">غیرفعال</span>{% endif %}</td>
+<td class="ltr">{{ s.db_user }}@{{ s.host }}:{{ s.port }}/{{ s.db_name }}</td><td class="ltr">{{ s.ext_ranges or '2 تا 5 رقمی' }}</td><td class="ltr">{{ s.trunks or 'خودکار' }}</td>
+<td>{{ calls_count.get(s.id, 0) }}</td><td>{{ s.last_sync|jdt if s.last_sync else '-' }}{% if s.cursor %}<div class="hint">آخرین تماس: {{ s.cursor|jdt }}</div>{% endif %}</td>
+<td class="wrap">{% if s.last_error %}<span class="badge err">خطا</span> <span class="hint">{{ s.last_error }}</span>{% elif s.last_sync %}<span class="badge ok">OK</span>{% else %}-{% endif %}</td>
+<td style="white-space:nowrap"><a class="btn s" href="/pbx/{{ s.id }}/edit">ویرایش</a>
+<form class="inline" method="post" action="/pbx/{{ s.id }}/test"><button class="btn s">تست اتصال</button></form>
+<form class="inline" method="post" action="/pbx/{{ s.id }}/sync"><button class="btn s">خواندن الان</button></form>
+<form class="inline" method="post" action="/pbx/{{ s.id }}/sync" onsubmit="return confirm('سوابق قبلی از ایزابل خوانده شود؟ تماس‌های تکراری دوباره ثبت نمی‌شوند.')"><select name="days" class="s"><option value="30">۳۰ روز</option><option value="90">۹۰ روز</option><option value="180">۶ ماه</option><option value="365">یک سال</option></select><button class="btn s">خواندن سوابق قبلی</button></form>
+<form class="inline" method="post" action="/pbx/{{ s.id }}/delete" onsubmit="return confirm('سرور و همه سوابق تماس آن از این برنامه حذف شود؟ (روی ایزابل چیزی تغییر نمی‌کند)')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">هنوز سروری تعریف نشده</td></tr>{% endfor %}
+</table></div>
+
+{% if edit %}
+<div class="card"><h3>{{ 'ویرایش ' ~ edit.name if edit.id else 'سرور جدید' }}</h3>
+<form method="post" action="/pbx/save">{% if edit.id %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+<div class="grid g3">
+  <div class="fg"><label>نام</label><input name="name" value="{{ edit.name or '' }}" placeholder="ایزابل دفتر مرکزی" required></div>
+  <div class="fg"><label>آدرس سرور (IP)</label><input name="host" class="ltr" value="{{ edit.host or '' }}" required></div>
+  <div class="fg"><label>پورت MySQL</label><input name="port" class="ltr" value="{{ edit.port or 3306 }}"></div>
+  <div class="fg"><label>نام دیتابیس</label><input name="db_name" class="ltr" value="{{ edit.db_name or 'asteriskcdrdb' }}"></div>
+  <div class="fg"><label>کاربر MySQL (فقط‌خواندنی)</label><input name="db_user" class="ltr" value="{{ edit.db_user or '' }}" placeholder="acct_reader"></div>
+  <div class="fg"><label>رمز {{ '(خالی = بدون تغییر)' if edit.id }}</label><input name="db_password" type="password" class="ltr" autocomplete="new-password"></div>
+  <div class="fg"><label>بازه شماره داخلی‌ها</label><input name="ext_ranges" class="ltr" value="{{ edit.ext_ranges or '' }}" placeholder="100-399, 5000-5099">
+    <div class="hint">خالی = هر شماره ۲ تا ۵ رقمی داخلی است.</div></div>
+  <div class="fg"><label>نام ترانک‌ها (اختیاری)</label><input name="trunks" class="ltr" value="{{ edit.trunks or '' }}" placeholder="tci-trunk, mokhaberat">
+    <div class="hint">خالی = هر کانالی که داخلی نیست ترانک حساب می‌شود.</div></div>
+  <div class="fg"><label>دفتر</label><select name="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if edit.office_id == o.id }}>{{ o.name }}</option>{% endfor %}</select></div>
+</div>
+<h4>تماس‌های زنده (AMI، اختیاری)</h4>
+<div class="grid g3">
+  <div class="fg"><label>پورت AMI</label><input name="ami_port" class="ltr" value="{{ edit.ami_port or 5038 }}"></div>
+  <div class="fg"><label>کاربر AMI (خالی = خاموش)</label><input name="ami_user" class="ltr" value="{{ edit.ami_user or '' }}" placeholder="acct_live"></div>
+  <div class="fg"><label>رمز AMI {{ '(خالی = بدون تغییر)' if edit.id }}</label><input name="ami_password" type="password" class="ltr" autocomplete="new-password"></div>
+</div>
+<label><input type="checkbox" name="enabled" value="1" {{ 'checked' if edit.enabled or not edit.id }}> فعال (هر دقیقه سوابق جدید خوانده شود)</label>
+<div style="margin-top:10px"><button class="btn p">ذخیره و تست اتصال</button> <a class="btn" href="/pbx">انصراف</a></div>
+</form>
+<h4>آماده‌سازی روی ایزابل (یک بار، با SSH به ایزابل)</h4>
+<p class="hint">۱) کاربر فقط‌خواندنی بسازید (رمز root دیتابیس در <span class="ltr">/etc/issabel.conf</span> با نام mysqlrootpwd است؛ <span class="ltr">APP_IP</span> = IP همین سرور برنامه):</p>
+<div class="code ltr">mysql -u root -p -e "CREATE USER 'acct_reader'@'APP_IP' IDENTIFIED BY 'StrongPass'; GRANT SELECT ON asteriskcdrdb.* TO 'acct_reader'@'APP_IP'; FLUSH PRIVILEGES;"</div>
+<p class="hint">۲) اگر MySQL فقط روی localhost گوش می‌دهد، در <span class="ltr">/etc/my.cnf</span> خط <span class="ltr">bind-address=127.0.0.1</span> را حذف یا به IP ایزابل تغییر دهید و <span class="ltr">systemctl restart mariadb</span> (در نسخه‌های قدیمی <span class="ltr">service mysqld restart</span>).
+۳) پورت 3306 را فقط برای IP سرور برنامه باز کنید (در ایزابل: Security ‹ Firewall، یا <span class="ltr">iptables -I INPUT -p tcp -s APP_IP --dport 3306 -j ACCEPT</span>). این کاربر فقط اجازه خواندن دارد و برنامه هیچ تغییری در ایزابل نمی‌دهد.</p>
+<p class="hint">۴) برای تماس‌های زنده (اختیاری) این چند خط را به انتهای <span class="ltr">/etc/asterisk/manager_custom.conf</span> اضافه کنید، سپس <span class="ltr">asterisk -rx "manager reload"</span> را اجرا کنید و پورت 5038 را فقط برای IP سرور برنامه باز کنید. این کاربر فقط اجازهٔ خواندن وضعیت تماس‌ها را دارد:</p>
+<div class="code ltr">[acct_live]<br>secret = StrongPass2<br>deny = 0.0.0.0/0.0.0.0<br>permit = APP_IP/255.255.255.255<br>read = call,reporting<br>write = reporting</div>
+</div>
+{% endif %}
+
+{% if ad_suggest %}<div class="card tbl" id="ad"><h3>پیشنهاد تخصیص از Active Directory <span class="hint">فیلد ipPhone کاربران؛ داخلی‌هایی که الان صاحب ندارند</span></h3>
+<form method="post" action="/pbx/ad-assign"><table><tr><th><input type="checkbox" checked onclick="this.closest('table').querySelectorAll('input[name=pick]').forEach(x=>x.checked=this.checked)"></th><th>داخلی</th><th>کارمند</th></tr>
+{% for g in ad_suggest %}<tr><td><input type="checkbox" name="pick" value="{{ g.user_id }}:{{ g.extension }}" checked></td><td class="ltr">{{ g.extension }}</td><td>{{ g.full_name or g.username }} <span class="hint ltr">{{ g.username }}</span></td></tr>{% endfor %}
+</table><button class="btn p">تخصیص موارد انتخاب‌شده</button></form></div>{% endif %}
+
+<div class="card" id="settings"><h3>تنظیم گزارش تماس</h3>
+<form method="post" action="/pbx/settings" class="filters">
+<div><label>سطح سرویس صف: پاسخ تا (ثانیه)</label> <input name="pbx_sl_seconds" class="ltr" size="4" value="{{ sl_seconds }}"></div>
+<div><label>هشدار وقتی تماس ورودی بی‌پاسخ در یک ساعت به این تعداد رسید (۰ = خاموش)</label> <input name="pbx_missed_alert" class="ltr" size="4" value="{{ missed_alert }}"></div>
+<div><button class="btn p">ذخیره</button></div></form>
+<p class="hint">هشدار حداکثر ساعتی یک بار در صفحهٔ «هشدارها» ثبت می‌شود.</p></div>
+
+<div class="card tbl" id="unassigned"><h3>داخلی‌های بدون صاحب <span class="hint">۳۰ روز اخیر</span></h3>
+<table><tr><th>داخلی</th><th>سرور</th><th>تماس</th><th>آخرین</th><th>تخصیص به</th></tr>
+{% for u in unassigned %}<tr><td class="ltr">{{ u.extension }}</td><td>{{ pbx_names.get(u.pbx_id, '-') }}</td><td>{{ u.count }}</td><td>{{ u.last|jdt }}</td>
+<td><form class="inline" method="post" action="/pbx/assign"><input type="hidden" name="extension" value="{{ u.extension }}">
+{% if servers|length > 1 %}<select name="pbx_id"><option value="{{ u.pbx_id }}">فقط {{ pbx_names.get(u.pbx_id, '') }}</option><option value="">همه سرورها</option></select>{% endif %}
+<select name="user_id" required><option value="">انتخاب کارمند</option>{% for id, un, fn in users %}<option value="{{ id }}">{{ fn or un }} ({{ un }})</option>{% endfor %}</select>
+<input name="start" class="ltr" size="10" placeholder="از تاریخ (خالی = همیشه)">
+<button class="btn s">ثبت</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="muted">همه داخلی‌هایی که تماس داشته‌اند صاحب دارند</td></tr>{% endfor %}
+</table></div>
+
+<div class="card tbl"><h3>تخصیص داخلی‌ها</h3>
+<p class="hint">هر داخلی برای یک بازه زمانی به یک نفر تخصیص داده می‌شود؛ تماس‌های هر زمان به نام کسی ثبت می‌شود که آن روز داخلی را داشته. یک نفر می‌تواند چند داخلی داشته باشد. برای تغییر یا افزودن، از فرم همان کارمند (بخش «داخلی‌های تلفن») یا جدول بالا استفاده کنید.</p>
+<table><tr><th>داخلی</th><th>سرور</th><th>کارمند</th><th>از</th><th>تا</th><th></th></tr>
+{% for a in assigns %}<tr><td class="ltr">{{ a.extension }}</td><td>{{ pbx_names.get(a.pbx_id, 'همه سرورها') }}</td>
+<td><a href="/users/{{ a.user_id }}/edit#ext">{{ user_names.get(a.user_id, '?') }}</a></td><td>{{ a.start|jdate if a.start else 'از ابتدا' }}</td><td>{{ a.end|jdate if a.end else 'تاکنون' }}</td>
+<td><form class="inline" method="post" action="/pbx/assign/{{ a.id }}/delete" onsubmit="return confirm('این تخصیص حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="muted">هنوز داخلی‌ای تخصیص داده نشده</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

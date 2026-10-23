@@ -1,0 +1,30 @@
+{% macro quota_fields(mb, allow_inherit) %}
+{% set gb = (mb is not none and mb and mb % 1024 == 0) %}
+<div class="grid g2">
+  <div class="fg"><label>سهمیه حجم {{ '(خالی = از گروه، ۰ = نامحدود)' if allow_inherit else '(۰ = نامحدود)' }}</label>
+    <input name="quota_value" class="ltr" value="{{ '' if mb is none else ((mb // 1024) if gb else mb) }}"></div>
+  <div class="fg"><label>واحد</label><select name="quota_unit"><option value="GB" {{ 'selected' if gb or mb is none or not mb }}>گیگابایت</option><option value="MB" {{ 'selected' if mb and not gb }}>مگابایت</option></select></div>
+</div>
+{% endmacro %}
+{% macro period_select(value, allow_inherit) %}
+<select name="quota_period">
+  {% if allow_inherit %}<option value="">از گروه</option>{% endif %}
+  {% for k, v in [('daily','روزانه'),('weekly','هفتگی (از شنبه)'),('monthly','ماهانه (ماه شمسی)'),('total','کل (بدون تمدید)')] %}
+  <option value="{{ k }}" {{ 'selected' if value == k }}>{{ v }}</option>{% endfor %}
+</select>
+{% endmacro %}
+{% macro hours_help() %}
+<div class="hint">خالی = بدون محدودیت. نمونه: <span class="ltr">sat-wed 08:00-17:00; thu 08:00-13:00</span> یا
+<span>شنبه-چهارشنبه 08:00-17:00</span>. روزها: sat sun mon tue wed thu fri یا all. بازه‌ای مثل <span class="ltr">22:00-02:00</span> از نیمه‌شب عبور می‌کند.
+کاربر خارج از این ساعات نمی‌تواند وصل شود و در پایان بازه به‌طور خودکار قطع می‌شود.</div>
+{% endmacro %}
+{% macro rate_help() %}
+<div class="hint">فرمت میکروتیک: <span class="ltr">آپلود/دانلود</span> مثل <span class="ltr">2M/8M</span> یا <span class="ltr">512k/2M</span>. همراه با Burst:
+<span class="ltr">1M/4M 2M/8M 512k/2M 16/16</span>. خالی = بدون محدودیت.</div>
+{% endmacro %}
+
+{% macro org_filters(f, offices, departments, groups) %}
+  {% if offices %}<div><label>دفتر</label><select name="office_id"><option value="">همه</option>{% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if f.office_id == o.id }}>{{ o.name }}</option>{% endfor %}</select></div>{% endif %}
+  {% if departments %}<div><label>واحد</label><select name="department_id"><option value="">همه</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if f.department_id == d.id }}>{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>{% endif %}
+  <div><label>گروه</label><select name="group_id"><option value="">همه</option>{% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if f.group_id == g.id }}>{{ g.name }}</option>{% endfor %}</select></div>
+{% endmacro %}

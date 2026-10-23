@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>سیستم‌های روشن ساعت {{ night_time }}</h2><a class="btn" href="/devices">دستگاه‌ها</a></div>
+<div class="card">
+<form class="filters" method="get">
+  <div><label>شب (شمسی)</label><input name="day" class="ltr" value="{{ day_j }}" size="11"></div>
+  <div><label>نوع</label><select name="type"><option value="computers" {{ 'selected' if type=='computers' }}>رایانه‌ها (رایانه، لپ‌تاپ، تین کلاینت، سرور)</option><option value="" {{ 'selected' if not type }}>همه تجهیزات</option>
+    {% for k, v in DEVICE_TYPES %}<option value="{{ k }}" {{ 'selected' if type==k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><button class="btn p">نمایش</button> <a class="btn" href="/devices/night.xlsx?day={{ day_j|urlencode }}&type={{ type }}">خروجی Excel</a>
+  {% if 'devices_edit' in perms %}</div></form><form class="inline" method="post" action="/devices/night/take" onsubmit="return confirm('فهرست امروز با دستگاه‌های روشنِ همین الان ساخته شود؟')"><button class="btn">ثبت فهرست همین الان</button></form>{% else %}</div></form>{% endif %}
+{% if days %}<div class="hint" style="margin-top:8px">شب‌های ثبت‌شده: {% for d in days[:14] %}<a href="?day={{ (d|jdate)|urlencode }}&type={{ type }}">{{ d|jdate }}</a>{{ '، ' if not loop.last }}{% endfor %}</div>{% endif %}
+</div>
+
+{% if taken_at %}
+<div class="grid g4" style="margin-bottom:16px">
+  {% for k, v in DEVICE_TYPES if counts.get(k) %}<div class="card stat"><div class="l">{{ v }}</div><div class="v">{{ counts[k] }}</div></div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card tbl"><h3>{{ day_j }}{% if taken_at %} <span class="hint">ثبت‌شده {{ taken_at|jdt }} · {{ rows|length }} مورد</span>{% endif %}</h3><table>
+<tr><th>#</th><th>نوع</th><th>نام</th><th>کاربر ویندوز (AD)</th><th>کاربر هات‌اسپات / VPN</th><th>IP</th><th>MAC</th><th>روتر</th><th>سازنده</th></tr>
+{% macro who(user) %}{% set u = names.get((user or '')|lower) %}{% if u %}<a href="/users/{{ u[0] }}/edit">{{ u[1] or user }}</a> <span class="hint">{{ user }}</span>{% else %}{{ user }}{% endif %}{% endmacro %}
+{% for r in rows %}{% set win = r.user if r.user_source in ('dc', 'script') else '' %}{% set hs = r.hotspot_user or ('' if win else r.user) %}
+<tr><td>{{ loop.index }}</td><td>{{ r.device_type|devtype }}</td>
+<td>{{ r.label or '' }}{% if r.hostname %}<div class="hint ltr">{{ r.hostname }}</div>{% endif %}</td>
+<td>{% if win %}{{ who(win) }}<div class="hint">{{ r.user_at|jdt }}</div>{% else %}<span class="muted">-</span>{% endif %}</td>
+<td>{% if hs %}{{ who(hs) }}<div class="hint">{% if r.hotspot_active %}<span class="badge ok">وصل</span>{% elif r.hotspot_at %}آخرین بار {{ r.hotspot_at|jdt }}{% endif %}</div>{% else %}<span class="muted">-</span>{% endif %}</td>
+<td class="ltr">{{ r.ip }}</td>
+<td class="ltr"><a href="/devices/{{ r.mac }}">{{ r.mac }}</a></td><td>{{ nas_names.get(r.nas_id, '-') }}</td><td class="wrap hint">{{ r.vendor }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">{% if taken_at %}در این شب دستگاهی از این نوع روشن نبود{% else %}برای این شب فهرستی ثبت نشده؛ فهرست هر شب ساعت {{ night_time }} خودکار ساخته می‌شود{% endif %}</td></tr>{% endfor %}
+</table></div>
+<p class="hint">«روشن» یعنی دستگاه در آخرین خواندن روترها (جدول ARP / DHCP / هات‌اسپات) دیده شده. «کاربر ویندوز» آخرین ورود دامنه روی همان رایانه است (از کنترلر دامنه یا اسکریپت ورود، پایین صفحه دستگاه‌ها) و «کاربر هات‌اسپات / VPN» آخرین کسی است که با آن دستگاه به هات‌اسپات یا VPN وارد شده؛ «وصل» یعنی سر ساعت فهرست هنوز وصل بود. نوع هر دستگاه را در صفحه دستگاه‌ها می‌توانید تک‌تک یا گروهی تعیین کنید.</p>
+{% endblock %}

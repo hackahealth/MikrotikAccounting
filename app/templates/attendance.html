@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import org_filters %}
+{% block content %}
+<div class="top"><h2>ساعات اتصال کارکنان <span class="hint">{{ start }} تا {{ end }}{{ ' · ' ~ caption if caption }}</span></h2>
+<div><a class="btn p" href="/attendance/export.xlsx?{{ qs }}">دانلود Excel</a> <button class="btn" onclick="window.print()">چاپ / PDF</button></div></div>
+<div class="card"><form class="filters" method="get">
+  <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
+    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر')] %}
+    <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'today' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>
+{{ org_filters(f, offices, departments, groups) }}
+  <div><label>کارمند</label><select name="user_id"><option value="">همه</option>{% for id, un, fn in users %}<option value="{{ id }}" {{ 'selected' if f.user_id == id }}>{{ fn or un }} ({{ un }})</option>{% endfor %}</select></div>
+  <div><button class="btn p" onclick="this.form.preset.value=''">نمایش</button></div>
+</form></div>
+<div class="card tbl"><table>
+<tr><th>تاریخ</th><th>کارمند</th><th>دفتر / واحد</th><th>اولین اتصال</th><th>آخرین اتصال</th><th>مدت آنلاین</th><th>در ساعات کاری</th><th>خارج از ساعات کاری</th><th>اتصال</th><th>مصرف</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>دستگاه</th></tr>
+{% for r in rows %}
+<tr><td>{{ r.day|jdate }}{% if not r.work_day %} <span class="badge warn">تعطیل</span>{% endif %}</td>
+<td>{{ r.full_name or r.username }} <span class="hint ltr">{{ r.username }}</span></td><td>{{ r.office }}{{ ' / ' if r.office and r.department }}{{ r.department }}{{ r.group if not r.office and not r.department }}</td>
+<td class="ltr">{{ r.first.strftime('%H:%M') }}</td><td class="ltr">{{ 'آنلاین' if r.still_online else r.last.strftime('%H:%M') }}</td>
+<td>{{ r.online|duration }}</td><td>{{ r.inside|duration }}</td><td>{% if r.outside >= 1800 %}<span class="badge warn">{{ r.outside|duration }}</span>{% else %}{{ r.outside|duration }}{% endif %}</td>
+<td>{{ r.sessions }}</td><td class="ltr">{{ r.bytes|bytes }}</td><td class="ltr">{{ r.internet|bytes }}</td><td class="ltr">{{ r.tunnel|bytes }}</td><td class="ltr">{{ r.internal|bytes }}</td><td>{{ r.devices }}</td></tr>
+{% else %}<tr><td colspan="14" class="muted">در این بازه اتصالی ثبت نشده</td></tr>{% endfor %}
+</table></div>
+<p class="hint">ساعات کاری مبنا: <span class="ltr">{{ work_hours }}</span>. این گزارش زمان اتصال به اینترنت سازمان (هات‌اسپات/VPN) را نشان می‌دهد و جایگزین سیستم حضور و غیاب نیست. همپوشانی اتصال‌های همزمان (مثلاً موبایل و لپ‌تاپ) یکبار حساب می‌شود.</p>
+{% endblock %}

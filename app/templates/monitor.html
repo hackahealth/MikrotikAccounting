@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>پایش روترها و تانل‌ها</h2>
+<form class="filters" method="get"><div><select name="days" onchange="this.form.submit()">{% for d in (1, 7, 30) %}<option value="{{ d }}" {{ 'selected' if days == d }}>{{ d|fa }} روز اخیر</option>{% endfor %}</select></div></form></div>
+<p class="hint">هر بار که برنامه API روتر را می‌خواند (هر دقیقه) در دسترس بودن روتر، روشن بودن اینترفیس‌های تانل و ping از روتر به مقصدهای تعیین‌شده (در فرم روتر، بخش «پایش») بررسی می‌شود. قطع شدن بعد از ۲ بار پشت‌سرهم ثبت و اعلان می‌شود.</p>
+{% for r in rows %}
+<div class="card"><h3>{{ r.nas.name }} <span class="hint ltr">{{ r.nas.api_host or r.nas.ip }}</span></h3>
+{% if r.targets %}<div class="tbl"><table>
+<tr><th>مورد</th><th>وضعیت</th><th>از</th><th>جزئیات</th><th>دسترس‌پذیری {{ days|fa }} روز</th><th>دفعات قطع / کندی</th></tr>
+{% for t in r.targets %}
+<tr><td>{{ t.label }}</td>
+<td>{% if t.state %}<span class="badge {{ 'ok' if t.state == 'up' else ('err' if t.state == 'down' else 'warn') }}">{{ state_fa[t.state] }}</span>{% else %}-{% endif %}</td>
+<td>{{ t.since|jdt if t.since else '-' }}</td><td class="wrap">{{ t.detail or '' }}</td>
+<td>{% if t.availability is not none %}<span class="ltr">{{ t.availability }}%</span>{% else %}-{% endif %}</td><td>{{ t.events }}</td></tr>
+{% endfor %}</table></div>
+{% else %}<p class="muted">هنوز داده‌ای ثبت نشده (بعد از اولین خواندن API روتر نمایش داده می‌شود).</p>{% endif %}
+</div>
+{% else %}<div class="card"><p class="muted">روتری با API تنظیم‌شده نیست.</p></div>{% endfor %}
+
+<div class="card"><h3>آخرین قطعی‌ها و کندی‌ها</h3><div class="tbl"><table>
+<tr><th>شروع</th><th>پایان</th><th>مدت</th><th>مورد</th><th>وضعیت</th><th>جزئیات</th></tr>
+{% for e in events %}{% set end = e.ended_at or now %}
+<tr><td>{{ e.ts|jdt }}</td><td>{{ e.ended_at|jdt if e.ended_at else 'ادامه دارد' }}</td>
+<td>{{ ((end - e.ts).total_seconds())|duration }}</td>
+<td>{{ e.target if e.target != 'router' else 'روتر' }} — {{ names.get(e.nas_id, '?') }}</td>
+<td><span class="badge {{ 'err' if e.state == 'down' else 'warn' }}">{{ state_fa[e.state] }}</span></td><td class="wrap">{{ e.detail }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">قطعی ثبت نشده</td></tr>{% endfor %}
+</table></div></div>
+
+<div class="card"><h3>تنظیم</h3>
+<form method="post" action="/monitor/settings" class="filters">
+<div><label>ping کند حساب شود وقتی میانگین بیشتر از (میلی‌ثانیه)</label> <input name="monitor_slow_ms" class="ltr" size="5" value="{{ slow }}"></div>
+<div><button class="btn p">ذخیره</button></div></form>
+<p class="hint">از دست رفتن ۳۰٪ بسته‌ها یا بیشتر هم «کند» حساب می‌شود؛ ۱۰۰٪ یعنی «قطع».</p></div>
+{% endblock %}

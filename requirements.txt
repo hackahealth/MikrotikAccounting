@@ -1,0 +1,16 @@
+fastapi>=0.110
+uvicorn>=0.29
+SQLAlchemy>=2.0.25
+Jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.1
+pyrad>=2.4
+ldap3>=2.9
+librouteros>=3.2
+pycryptodome>=3.19
+cryptography>=41
+tzdata
+openpyxl>=3.1
+paramiko>=3.4
+# optional: PostgreSQL instead of SQLite
+psycopg2-binary>=2.9

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% macro field(f, cur) %}
+  {% set v = cur.get(f) if cur else none %}
+  <div class="fg"><label>{{ labels.get(f, f) }}</label>
+  {% if f in bool_fields %}<label><input type="checkbox" name="f_{{ f }}" value="1" {{ 'checked' if v is sameas true }}> بله</label>
+  {% elif f == 'profile' %}<select name="f_profile">{% for p in data.get('hs_profile' if tab == 'hs_user' else 'ppp_profile', []) %}<option {{ 'selected' if v == p.name }}>{{ p.name }}</option>{% endfor %}</select>
+  {% elif f == 'server' %}<select name="f_server"><option value="all">all (همه)</option>{% for h in data.get('hs_server', []) %}<option {{ 'selected' if v == h.name }}>{{ h.name }}</option>{% endfor %}</select>
+  {% elif f == 'address-pool' %}<select name="f_address-pool"><option value="none">none</option>{% for p in data.get('pools', []) %}<option {{ 'selected' if v == p.name }}>{{ p.name }}</option>{% endfor %}</select>
+  {% elif f in enum_fields %}<select name="f_{{ f }}">{% for o in enum_fields[f] %}<option {{ 'selected' if v|rosval == o }}>{{ o }}</option>{% endfor %}</select>
+  {% elif f in size_fields %}<input name="f_{{ f }}" class="ltr" value="{{ v|sizestr }}" placeholder="5G">
+  {% elif f == 'password' %}<input name="f_password" class="ltr" value="" placeholder="{{ 'خالی = بدون تغییر' if cur else '' }}" autocomplete="new-password">
+  {% else %}<input name="f_{{ f }}" class="{{ '' if f == 'comment' else 'ltr' }}" value="{{ v|rosval }}" {{ 'list=pools' if f in ('remote-address', 'local-address') }}>{% endif %}
+  </div>
+{% endmacro %}
+{% block content %}
+<div class="top"><h2>اکانت‌های محلی میکروتیک {% if data.identity %}<span class="hint">{{ data.identity }}</span>{% endif %}</h2>
+<form method="get" class="filters" style="margin:0">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div><label>روتر</label><select name="nas_id" onchange="this.form.submit()">{% for r in routers %}<option value="{{ r.id }}" {{ 'selected' if nas and r.id == nas.id }}>{{ r.name }} ({{ r.api_host or r.ip }})</option>{% endfor %}</select></div>
+</form></div>
+{% if not routers %}<div class="card"><p>هیچ روتری با API تعریف نشده. در «روترها» کاربر و رمز API روتر را وارد کنید.</p></div>
+{% else %}
+<div class="tabs">{% for k, t in titles.items() %}<a href="/mt-local?nas_id={{ nas.id }}&tab={{ k }}" class="{{ 'on' if tab == k }}">{{ t }}{% if data.get(k) is not none %} <span class="hint">({{ data.get(k)|length }})</span>{% endif %}</a>{% endfor %}</div>
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+<datalist id="pools">{% for p in data.get('pools', []) %}<option value="{{ p.name }}">{% endfor %}</datalist>
+
+<div class="card">
+<form method="get" class="filters"><input type="hidden" name="nas_id" value="{{ nas.id }}"><input type="hidden" name="tab" value="{{ tab }}">
+  <div><label>جستجو</label><input name="q" value="{{ q }}" placeholder="نام یا توضیح"></div><div><button class="btn">جستجو</button></div>
+  <div><a class="btn p" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}#form">+ جدید</a></div>
+</form>
+<form method="post" action="/mt-local/action" id="actform">
+<input type="hidden" name="nas_id" value="{{ nas.id }}"><input type="hidden" name="kind" value="{{ tab }}">
+<input type="hidden" name="service" value="{{ 'hotspot' if tab == 'hs_user' else 'vpn' }}">
+<div class="tbl"><table>
+{% if tab == 'hs_user' %}
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('.sel').forEach(c=>c.checked=this.checked)"></th><th>نام کاربری</th><th>توضیح</th><th>پروفایل</th><th>سرور</th><th>سقف زمان</th><th>سقف حجم</th><th>مصرف</th><th>زمان استفاده‌شده</th><th>MAC</th><th>وضعیت</th><th></th></tr>
+{% for i in items %}<tr><td><input type="checkbox" class="sel" name="ids" value="{{ i['.id'] }}"></td>
+<td class="ltr">{{ i.name }} {% if i.name in online %}<span class="badge ok">آنلاین</span>{% endif %}</td><td>{{ i.comment }}</td>
+<td>{{ i.profile }}</td><td>{{ i.server or 'all' }}</td><td class="ltr">{{ i.get('limit-uptime', '')|rosval }}</td>
+<td class="ltr">{{ i.get('limit-bytes-total')|bytes if i.get('limit-bytes-total') else '-' }}</td>
+<td class="ltr">{{ ((i.get('bytes-in') or 0) + (i.get('bytes-out') or 0))|bytes }}</td><td class="ltr">{{ i.uptime }}</td>
+<td class="ltr">{{ i.get('mac-address', '') }}</td>
+<td>{% if i.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}{% if i.dynamic %} <span class="badge">dynamic</span>{% endif %}</td>
+<td><a class="btn s" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}&edit={{ i['.id'] }}#form">ویرایش</a>
+{% if i.name in online %}<button class="btn s d" formaction="/mt-local/kick" name="name" value="{{ i.name }}">قطع</button>{% endif %}</td></tr>
+{% else %}<tr><td colspan="12" class="muted">موردی نیست</td></tr>{% endfor %}
+{% elif tab == 'ppp_secret' %}
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('.sel').forEach(c=>c.checked=this.checked)"></th><th>نام کاربری</th><th>توضیح</th><th>سرویس</th><th>پروفایل</th><th>آدرس روتر</th><th>آدرس کاربر</th><th>آخرین خروج</th><th>وضعیت</th><th></th></tr>
+{% for i in items %}<tr><td><input type="checkbox" class="sel" name="ids" value="{{ i['.id'] }}"></td>
+<td class="ltr">{{ i.name }} {% if i.name in online %}<span class="badge ok">آنلاین</span>{% endif %}</td><td>{{ i.comment }}</td>
+<td>{{ i.service }}</td><td>{{ i.profile }}</td><td class="ltr">{{ i.get('local-address', '') }}</td><td class="ltr">{{ i.get('remote-address', '') }}</td>
+<td class="ltr">{{ i.get('last-logged-out', '') }}</td>
+<td>{% if i.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}</td>
+<td><a class="btn s" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}&edit={{ i['.id'] }}#form">ویرایش</a>
+{% if i.name in online %}<button class="btn s d" formaction="/mt-local/kick" name="name" value="{{ i.name }}">قطع</button>{% endif %}</td></tr>
+{% else %}<tr><td colspan="10" class="muted">موردی نیست</td></tr>{% endfor %}
+{% elif tab == 'hs_profile' %}
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('.sel').forEach(c=>c.checked=this.checked)"></th><th>نام</th><th>سرعت</th><th>اتصال همزمان</th><th>مدت هر اتصال</th><th>بیکاری</th><th>Pool</th><th>Address-List</th><th></th></tr>
+{% for i in items %}<tr><td><input type="checkbox" class="sel" name="ids" value="{{ i['.id'] }}"></td><td>{{ i.name }}</td>
+<td class="ltr">{{ i.get('rate-limit', '') or 'نامحدود' }}</td><td>{{ i.get('shared-users', '') }}</td><td class="ltr">{{ i.get('session-timeout', '') }}</td>
+<td class="ltr">{{ i.get('idle-timeout', '') }}</td><td>{{ i.get('address-pool', '') }}</td><td>{{ i.get('address-list', '') }}</td>
+<td><a class="btn s" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}&edit={{ i['.id'] }}#form">ویرایش</a></td></tr>
+{% else %}<tr><td colspan="9" class="muted">موردی نیست</td></tr>{% endfor %}
+{% else %}
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('.sel').forEach(c=>c.checked=this.checked)"></th><th>نام</th><th>آدرس روتر</th><th>آدرس کاربر</th><th>سرعت</th><th>فقط یک اتصال</th><th>DNS</th><th></th></tr>
+{% for i in items %}<tr><td><input type="checkbox" class="sel" name="ids" value="{{ i['.id'] }}"></td><td>{{ i.name }}</td>
+<td class="ltr">{{ i.get('local-address', '') }}</td><td class="ltr">{{ i.get('remote-address', '') }}</td><td class="ltr">{{ i.get('rate-limit', '') or 'نامحدود' }}</td>
+<td>{{ i.get('only-one', '')|rosval }}</td><td class="ltr">{{ i.get('dns-server', '') }}</td>
+<td><a class="btn s" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}&edit={{ i['.id'] }}#form">ویرایش</a></td></tr>
+{% else %}<tr><td colspan="8" class="muted">موردی نیست</td></tr>{% endfor %}
+{% endif %}
+</table></div>
+<div class="actions">با انتخاب‌شده‌ها:
+  {% if tab in ('hs_user', 'ppp_secret') %}<button class="btn s" name="action" value="enable">فعال</button>
+  <button class="btn s" name="action" value="disable">غیرفعال</button>{% endif %}
+  {% if tab == 'hs_user' %}<button class="btn s" name="action" value="reset" onclick="return confirm('شمارنده مصرف صفر شود؟')">صفر کردن مصرف</button>{% endif %}
+  {% if tab in ('hs_user', 'ppp_secret') %}<button class="btn s" name="action" value="link" title="برای گزارش‌گیری و تعیین دفتر/واحد">ثبت در برنامه</button>{% endif %}
+  <button class="btn s d" name="action" value="delete" onclick="return confirm('موارد انتخاب‌شده از روتر حذف شوند؟')">حذف از روتر</button>
+</div>
+</form></div>
+
+<div class="card" id="form"><h3>{{ ('ویرایش «' ~ current.name ~ '»') if current else ('افزودن به ' ~ titles[tab]) }} روی {{ nas.name }}</h3>
+<form method="post" action="/mt-local/save">
+<input type="hidden" name="nas_id" value="{{ nas.id }}"><input type="hidden" name="kind" value="{{ tab }}"><input type="hidden" name="item_id" value="{{ current['.id'] if current else '' }}">
+<div class="grid g3">{% for f in kinds[tab][1] %}{{ field(f, current) }}{% endfor %}
+{% if tab in ('hs_user', 'ppp_secret') %}
+  <div class="fg"><label>دفتر (در برنامه)</label><select name="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>واحد (در برنامه)</label><select name="department_id"><option value="">-</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+{% endif %}</div>
+<button class="btn p">ذخیره روی روتر</button> {% if current %}<a class="btn" href="/mt-local?nas_id={{ nas.id }}&tab={{ tab }}">انصراف</a>{% endif %}
+</form>
+<p class="hint">تغییرات مستقیماً روی خود میکروتیک (از طریق API) اعمال می‌شود. اکانت محلی روتر قبل از RADIUS بررسی می‌شود؛ با فعال بودن Accounting، مصرف این اکانت‌ها هم در گزارش‌ها می‌آید.</p>
+</div>
+
+{% if tab in ('hs_user', 'ppp_secret') %}
+<div class="card"><h3>ایجاد گروهی {{ titles[tab] }}</h3>
+<form method="post" action="/mt-local/bulk">
+<input type="hidden" name="nas_id" value="{{ nas.id }}"><input type="hidden" name="kind" value="{{ tab }}">
+<div class="fg radios"><label><input type="radio" name="mode" value="generate" checked> ساخت خودکار (کارت/ووچر)</label>
+  <label><input type="radio" name="mode" value="lines"> از فهرست</label></div>
+<div class="grid g4">
+  <div class="fg"><label>پیشوند نام</label><input name="prefix" class="ltr" value="{{ 'guest' if tab == 'hs_user' else 'vpn' }}"></div>
+  <div class="fg"><label>شروع شماره</label><input name="start" class="ltr" value="1"></div>
+  <div class="fg"><label>تعداد</label><input name="count" class="ltr" value="20"></div>
+  <div class="fg"><label>طول رمز</label><input name="pass_len" class="ltr" value="6"> <label><input type="checkbox" name="digits" value="1"> فقط عدد</label></div>
+</div>
+<div class="fg"><label>یا فهرست — هر خط: نام‌کاربری,رمز,توضیح</label><textarea name="lines" rows="3" class="ltr" placeholder="ali,Pass123,Ali Rezaei"></textarea></div>
+<div class="grid g4">
+  {{ field('profile', none) }}
+  {% if tab == 'hs_user' %}{{ field('server', none) }}{{ field('limit-uptime', none) }}{{ field('limit-bytes-total', none) }}
+  {% else %}{{ field('service', none) }}{{ field('remote-address', none) }}{% endif %}
+  <div class="fg"><label>توضیح</label><input name="bulk_comment"></div>
+  <div class="fg"><label>دفتر (در برنامه)</label><select name="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>واحد (در برنامه)</label><select name="department_id"><option value="">-</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+</div>
+<button class="btn p">ایجاد روی روتر</button></form></div>
+{% endif %}
+{% endif %}
+{% endblock %}

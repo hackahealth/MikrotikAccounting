@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>نتیجه ویرایش گروهی</h2><a class="btn p" href="{{ back }}">بازگشت به کاربران</a></div>
+<div class="card"><b>{{ ok }}</b> از {{ results|length }} کاربر تغییر کرد{% if results|length - ok %}؛ <span class="badge err">{{ results|length - ok }} ناموفق</span> (برای این‌ها هیچ تغییری ذخیره نشد){% endif %}.
+<div class="hint">فیلدهای تغییر داده شده: {{ fields|join('، ') }}{% if not ad_write %} · نوشتن در AD خاموش بود{% endif %}</div></div>
+<div class="card tbl"><table>
+<tr><th>کاربر</th><th>نام</th><th>منبع</th><th>نتیجه</th><th>توضیح</th></tr>
+{% for r in results %}
+<tr><td><a href="/users/{{ r.u.id }}/edit">{{ r.u.username }}</a></td><td>{{ r.u.full_name }}</td><td>{{ {'ldap': 'AD', 'router': 'روتر'}.get(r.u.source, 'محلی') }}</td>
+<td>{% if r.ok %}<span class="badge ok">انجام شد</span>{% else %}<span class="badge err">ناموفق</span>{% endif %}</td><td class="wrap">{{ r.msg }}</td></tr>
+{% endfor %}
+</table></div>
+{% endblock %}

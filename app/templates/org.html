@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>دفترها و واحدهای سازمان</h2></div>
+<div class="grid g2">
+<div class="card"><h3>دفترها / شعبه‌ها</h3>
+<div class="tbl"><table><tr><th>دفتر</th><th>شهر</th><th>کد</th><th>کارکنان</th><th>مدیر (پنل)</th><th></th></tr>
+{% for o in offices %}<tr><td>{{ o.name }}{% if o.ldap_value and o.ldap_value != o.name %} <span class="hint">AD: {{ o.ldap_value }}</span>{% endif %}</td>
+<td>{{ o.city }}</td><td class="ltr">{{ o.code }}</td>
+<td>{% if 'users_view' in perms %}<a href="/users?office={{ o.id }}">{{ oc.get(o.id, 0) }}</a>{% else %}{{ oc.get(o.id, 0) }}{% endif %}</td>
+<td>{{ '، '.join(managers.get(('o', o.id), [])) or '-' }}</td>
+<td><a class="btn s" href="/org?edit_office={{ o.id }}">ویرایش</a>
+<form class="inline" method="post" action="/org/office/{{ o.id }}/delete" onsubmit="return confirm('دفتر حذف شود؟ کاربران آن بدون دفتر می‌شوند.')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="muted">هنوز دفتری تعریف نشده</td></tr>{% endfor %}
+</table></div>
+<p class="hint">کاربران بدون دفتر: {{ unassigned }}</p>
+<h3>{{ 'ویرایش دفتر ' ~ eo.name if eo else 'دفتر جدید' }}</h3>
+<form method="post" action="/org/office/save"><input type="hidden" name="id" value="{{ eo.id if eo else '' }}">
+<div class="grid g2">
+  <div class="fg"><label>نام دفتر</label><input name="name" value="{{ eo.name if eo else '' }}" placeholder="دفتر یزد"></div>
+  <div class="fg"><label>شهر</label><input name="city" value="{{ eo.city if eo else '' }}" placeholder="یزد"></div>
+  <div class="fg"><label>کد</label><input name="code" class="ltr" value="{{ eo.code if eo else '' }}"></div>
+  <div class="fg"><label>مقدار در AD (Office)</label><input name="ldap_value" value="{{ eo.ldap_value if eo else '' }}" placeholder="Yazd"></div>
+</div>
+<div class="fg"><label>توضیح</label><input name="description" value="{{ eo.description if eo else '' }}"></div>
+<button class="btn p">ذخیره دفتر</button> {% if eo %}<a class="btn" href="/org">انصراف</a>{% endif %}
+</form></div>
+
+<div class="card"><h3>واحدها</h3>
+<div class="tbl"><table><tr><th>واحد</th><th>دفتر</th><th>کارکنان</th><th>مدیر (پنل)</th><th></th></tr>
+{% for d in departments %}<tr><td>{{ d.name }}{% if d.ldap_value and d.ldap_value != d.name %} <span class="hint">AD: {{ d.ldap_value }}</span>{% endif %}</td>
+<td>{{ d.office.name if d.office else 'همه دفترها' }}</td>
+<td>{% if 'users_view' in perms %}<a href="/users?department={{ d.id }}">{{ dc.get(d.id, 0) }}</a>{% else %}{{ dc.get(d.id, 0) }}{% endif %}</td>
+<td>{{ '، '.join(managers.get(('d', d.id), [])) or '-' }}</td>
+<td><a class="btn s" href="/org?edit_dept={{ d.id }}">ویرایش</a>
+<form class="inline" method="post" action="/org/dept/{{ d.id }}/delete" onsubmit="return confirm('واحد حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="muted">هنوز واحدی تعریف نشده</td></tr>{% endfor %}
+</table></div>
+<h3>{{ 'ویرایش واحد ' ~ ed.name if ed else 'واحد جدید' }}</h3>
+<form method="post" action="/org/dept/save"><input type="hidden" name="id" value="{{ ed.id if ed else '' }}">
+<div class="grid g2">
+  <div class="fg"><label>نام واحد</label><input name="name" value="{{ ed.name if ed else '' }}" placeholder="مالی"></div>
+  <div class="fg"><label>دفتر</label><select name="office_id"><option value="">مشترک (همه دفترها)</option>
+    {% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if ed and ed.office_id == o.id }}>{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>مقدار در AD (Department)</label><input name="ldap_value" value="{{ ed.ldap_value if ed else '' }}" placeholder="Finance"></div>
+  <div class="fg"><label>توضیح</label><input name="description" value="{{ ed.description if ed else '' }}"></div>
+</div>
+<button class="btn p">ذخیره واحد</button> {% if ed %}<a class="btn" href="/org">انصراف</a>{% endif %}
+</form></div>
+</div>
+
+<div class="card"><h3>تخصیص گروهی کارکنان به دفتر / واحد</h3>
+<form method="post" action="/org/assign">
+<div class="fg"><label>نام‌های کاربری (هر خط یکی، یا با ویرگول؛ <span class="ltr">*</span> = همه)</label><textarea name="usernames" rows="3" class="ltr" placeholder="ali&#10;reza"></textarea></div>
+<div class="grid g3">
+  <div class="fg"><label>دفتر</label><select name="office_id"><option value="keep">بدون تغییر</option><option value="">حذف دفتر</option>
+    {% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>واحد</label><select name="department_id"><option value="keep">بدون تغییر</option><option value="">حذف واحد</option>
+    {% for d in departments %}<option value="{{ d.id }}">{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>
+</div>
+<button class="btn p">اعمال</button></form>
+<p class="hint">برای دسترسی «مدیر دفتر / واحد»، در «کاربران پنل» یک کاربر با نقش «مدیر دفتر / واحد» بسازید و دفتر یا واحد او را تیک بزنید. او فقط کارکنان همان محدوده را می‌بیند (فقط مشاهده).
+اگر AD متصل باشد، دفتر و واحد هر کاربر از فیلدهای Office و Department خوانده می‌شود.</p>
+</div>
+{% endblock %}

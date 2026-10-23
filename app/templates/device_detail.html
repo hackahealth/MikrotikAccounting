@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% macro until(h) %}{% if now - h.last_seen <= gap %}<span class="badge ok">هم‌اکنون</span>{% else %}{{ h.last_seen|jdt }}{% endif %}{% endmacro %}
+{% block content %}
+<div class="top"><h2>دستگاه <span class="ltr">{{ d.mac }}</span></h2><a class="btn" href="/devices">بازگشت به دستگاه‌ها</a></div>
+<div class="card"><div class="grid g4">
+  <div><div class="hint">وضعیت</div>{% if state == 'online' %}<span class="badge ok">آنلاین</span>{% elif state == 'active' %}<span class="badge">فعال</span>{% else %}<span class="badge warn">راکد</span> <span class="hint">(بیش از {{ stale_days }} روز دیده نشده)</span>{% endif %}</div>
+  <div><div class="hint">IP فعلی / آخرین</div><span class="ltr">{{ d.last_ip or '-' }}</span></div>
+  <div><div class="hint">روتر</div>{{ nas_names.get(d.last_nas_id, '-') }}</div>
+  <div><div class="hint">کاربر هات‌اسپات / VPN</div>{{ d.last_user or '-' }}</div>
+  <div><div class="hint">نوع / سیستم‌عامل</div>{{ d.device_type|devtype }}{{ ' · ' ~ d.os if d.os }}
+</div>
+  <div><div class="hint">سازنده</div>{{ d.vendor or '-' }}{% if d.random_mac %} <span class="badge warn">MAC تصادفی</span>{% endif %}</div>
+  <div><div class="hint">نام میزبان</div><span class="ltr">{{ d.hostname or '-' }}</span></div>
+  <div><div class="hint">آخرین ورود ویندوز</div>{% if d.logon_user %}{{ d.logon_user }} <span class="hint">{{ d.logon_at|jdt }} · {{ 'کنترلر دامنه' if d.logon_source == 'dc' else 'اسکریپت ورود' }}</span>{% else %}-{% endif %}</div>
+  <div><div class="hint">اولین / آخرین مشاهده</div>{{ d.first_seen|jdt }} — {{ d.last_seen|jdt }}</div>
+</div>
+{% if 'devices_edit' in perms %}<form method="post" action="/devices/{{ d.id }}/type" class="filters" style="margin-top:12px"><input type="hidden" name="back" value="/devices/{{ d.mac }}">
+  <div><label>نوع تجهیز</label><select name="device_type">{% for k, v in DEVICE_TYPES %}<option value="{{ k }}" {{ 'selected' if d.device_type == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div style="min-width:240px"><label>نام / توضیح</label><input name="label" value="{{ d.label or '' }}" placeholder="مثلاً پرینتر طبقه دوم"></div>
+  <div><button class="btn p">ذخیره</button></div>
+</form>{% elif d.label %}<p>{{ d.label }}</p>{% endif %}
+</div>
+
+<div class="card tbl"><h3>خلاصه IPها و کاربران این دستگاه</h3><table>
+<tr><th>نوع</th><th>مقدار</th><th>روترها</th><th>اولین بار</th><th>آخرین بار</th><th>تعداد بازه</th><th>مجموع مدت</th></tr>
+{% for e in summary %}
+<tr><td>{{ 'IP' if e.kind == 'ip' else 'کاربر' }}</td>
+<td class="ltr">{% if e.kind == 'user' and user_ids.get(e.value|lower) %}<a href="/users/{{ user_ids[e.value|lower] }}/edit">{{ e.value }}</a>{% else %}{{ e.value }}{% endif %}</td>
+<td>{% for n in e.nas %}{{ nas_names.get(n, '?') }}{{ '، ' if not loop.last }}{% else %}-{% endfor %}</td>
+<td>{{ e.first|jdt }}</td><td>{{ e.last|jdt }}</td><td>{{ e.count }}</td><td>{{ e.secs|duration }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">هنوز سابقه‌ای ثبت نشده</td></tr>{% endfor %}
+</table></div>
+
+<div class="grid g2">
+<div class="card tbl"><h3>بازه‌های IP</h3><table>
+<tr><th>IP</th><th>روتر</th><th>از</th><th>تا</th><th>مدت</th><th>منبع</th></tr>
+{% for h in ips %}
+<tr><td class="ltr"><a href="/devices?q={{ h.value|urlencode }}">{{ h.value }}</a></td><td>{{ nas_names.get(h.nas_id, '-') }}</td>
+<td>{{ h.first_seen|jdt }}</td><td>{{ until(h) }}</td><td>{{ (h.last_seen - h.first_seen).total_seconds()|duration }}</td><td class="hint">{{ h.source }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">-</td></tr>{% endfor %}
+</table></div>
+<div class="card tbl"><h3>بازه‌های کاربر وارد شده</h3><table>
+<tr><th>کاربر</th><th>روتر</th><th>از</th><th>تا</th><th>مدت</th><th>منبع</th></tr>
+{% for h in users_hist %}
+<tr><td>{% if user_ids.get(h.value|lower) %}<a href="/users/{{ user_ids[h.value|lower] }}/edit">{{ h.value }}</a>{% else %}{{ h.value }}{% endif %}</td><td>{{ nas_names.get(h.nas_id, '-') }}</td>
+<td>{{ h.first_seen|jdt }}</td><td>{{ until(h) }}</td><td>{{ (h.last_seen - h.first_seen).total_seconds()|duration }}</td><td class="hint">{{ h.source }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">-</td></tr>{% endfor %}
+</table></div>
+</div>
+
+<div class="card tbl"><h3>اتصال‌های ثبت‌شده با این MAC (آخرین ۲۰۰)</h3><table>
+<tr><th>کاربر</th><th>سرویس</th><th>IP</th><th>شروع</th><th>پایان</th><th>مدت</th><th>دانلود</th><th>آپلود</th><th>علت قطع</th></tr>
+{% for s in sessions %}
+<tr><td>{{ s.username }}</td><td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ s.framed_ip }}</td>
+<td>{{ s.start_time|jdt }}</td><td>{% if s.active %}<span class="badge ok">آنلاین</span>{% else %}{{ s.stop_time|jdt }}{% endif %}</td>
+<td>{{ s.session_time|duration }}</td><td class="ltr">{{ s.bytes_out|bytes }}</td><td class="ltr">{{ s.bytes_in|bytes }}</td><td class="hint">{{ s.terminate_cause }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">-</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

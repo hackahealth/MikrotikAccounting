@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>هشدارها</h2>
+<form class="filters" method="get">
+<div><select name="kind"><option value="">همه</option><option value="lock" {{ 'selected' if kind == 'lock' }}>قفل حساب</option><option value="monitor" {{ 'selected' if kind == 'monitor' }}>قطعی / کندی شبکه</option><option value="access" {{ 'selected' if kind == 'access' }}>دسترسی غیرمجاز</option></select></div>
+<div><label><input type="checkbox" name="unread" value="1" {{ 'checked' if unread }}> فقط خوانده‌نشده</label></div>
+<div><button class="btn">فیلتر</button></div></form></div>
+<form method="post" action="/alerts/read"><input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}">
+<div style="margin-bottom:10px"><button class="btn">همه را خوانده‌شده کن</button></div></form>
+<div class="card tbl"><table>
+<tr><th>زمان</th><th>سطح</th><th>عنوان</th><th>شرح</th><th>وضعیت</th></tr>
+{% for a in items %}
+<tr style="{{ '' if a.read_at else 'font-weight:600' }}"><td>{{ a.ts|jdt }}</td>
+<td><span class="badge {{ 'err' if a.level == 'err' else ('warn' if a.level == 'warn' else 'ok') }}">{{ {'err': 'مهم', 'warn': 'هشدار', 'info': 'اطلاع'}[a.level] }}</span></td>
+<td>{% if a.link %}<a href="{{ a.link }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</td><td class="wrap">{{ a.body }}</td>
+<td>{% if a.read_at %}<span class="hint">خوانده شد {{ a.read_by }}</span>{% else %}<form method="post" action="/alerts/read" style="display:inline"><input type="hidden" name="id" value="{{ a.id }}"><input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}"><button class="btn s">خواندم</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">هشداری نیست</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

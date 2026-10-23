@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>کاربران پنل و سطوح دسترسی</h2><div>
+<form class="inline" method="post" action="/admins/reset-tour" onsubmit="return confirm('آموزش ورود اول دوباره برای همه نشان داده شود؟')"><button class="btn" title="آموزش ورود اول در ورود بعدی دوباره برای همه کاربران پنل و صفحه «مصرف من» نشان داده می‌شود">نمایش دوباره آموزش برای همه</button></form>
+<a class="btn p" href="/admins/new">+ کاربر پنل جدید</a></div></div>
+<p class="hint">کاربر پنل می‌تواند حساب محلی (رمز همین پنل) یا کاربر Active Directory باشد که با نام کاربری و رمز دامنه وارد می‌شود؛ مثلاً مدیر دفتر تهران با حساب AD خودش، با محدوده دفتر خودش. کاربران اینترنتی که دسترسی پنل ندارند با همان صفحه ورود به «مصرف اینترنت من» می‌روند.</p>
+<div class="card tbl"><table>
+<tr><th>نام کاربری</th><th>نوع حساب</th><th>نام</th><th>نقش</th><th>محدوده</th><th>دسترسی‌ها</th><th>آخرین ورود</th><th>وضعیت</th><th></th></tr>
+{% for a in items %}
+<tr><td class="ltr">{{ a.username }}</td>
+<td>{% if is_local(a) %}محلی{% else %}<span class="badge">AD</span>{% if linked.get(a.user_id) %} <a class="hint" href="/users/{{ a.user_id }}/edit">کاربر اینترنت</a>{% endif %}{% endif %}</td><td>{{ a.full_name }}</td>
+<td>{{ roles[a.role][0] }}{% if a.permissions %} <span class="badge warn">سفارشی</span>{% endif %}</td>
+<td class="wrap">{{ scope_labels[a.id] or 'همه' }}</td>
+<td class="wrap"><div class="chips">{% for p in permissions if p in user_permissions(a) %}<span class="badge">{{ permissions[p] }}</span>{% endfor %}</div></td>
+<td>{{ a.last_login|jdt }}</td>
+<td>{% if not a.enabled %}<span class="badge err">غیرفعال</span>{% elif a.locked_until and a.locked_until > now %}<span class="badge err">قفل</span>{% else %}<span class="badge ok">فعال</span>{% endif %}
+  {% if a.must_change_password and is_local(a) %}<span class="badge warn">باید رمز را عوض کند</span>{% endif %}</td>
+<td><a class="btn s" href="/admins/{{ a.id }}/edit">ویرایش</a>
+{% if a.locked_until %}<form class="inline" method="post" action="/admins/{{ a.id }}/unlock"><button class="btn s">باز کردن قفل</button></form>{% endif %}
+{% if a.id != me.id %}<form class="inline" method="post" action="/admins/{{ a.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form>{% endif %}</td></tr>
+{% endfor %}
+</table></div>
+<div class="card"><h3>نقش‌ها</h3><div class="tbl"><table><tr><th>نقش</th><th>دسترسی پیش‌فرض</th></tr>
+{% for k, r in roles.items() %}<tr><td>{{ r[0] }}</td><td class="wrap"><div class="chips">{% for p in r[1] %}<span class="badge">{{ permissions[p] }}</span>{% endfor %}</div></td></tr>{% endfor %}
+</table></div><p class="hint">برای هر کاربر (به‌جز مدیر سیستم) می‌توانید دسترسی‌ها را جداگانه کم یا زیاد کنید.</p></div>
+{% endblock %}

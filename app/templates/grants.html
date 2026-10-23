@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>مجوزهای موقت</h2></div>
+<div class="card"><h3>مجوز تازه</h3>
+<form method="post" action="/grants/add">
+<div class="grid g3">
+<div class="fg"><label>نام کاربری</label><input name="username" class="ltr" value="{{ sel.username if sel else '' }}" required></div>
+<div class="fg"><label>نوع مجوز</label><select name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+<div class="fg"><label>به دستور (الزامی)</label><input name="ordered_by" required placeholder="مثلاً مدیرعامل / آقای ..."></div>
+<div class="fg"><label>از تاریخ و ساعت</label><div><input name="start_day" class="ltr" size="10" value="{{ today }}"> <input name="start_time" class="ltr" size="5" value="{{ '%02d:%02d' % (now.hour, now.minute) }}"></div></div>
+<div class="fg"><label>تا تاریخ و ساعت</label><div><input name="end_day" class="ltr" size="10" value="{{ today }}"> <input name="end_time" class="ltr" size="5" value="23:59"></div></div>
+<div class="fg"><label>علت / توضیح</label><input name="reason"></div>
+</div>
+<p class="hint">«کار خارج از ساعات مجاز»: در این بازه محدودیت ساعت گروه اعمال نمی‌شود. «اینترنت آزاد»: سقف حجم اعمال نمی‌شود (و بعد از راه‌اندازی مسدودی سایت‌ها، آن هم برای این کاربر برداشته می‌شود).</p>
+<button class="btn p">ثبت مجوز</button></form></div>
+
+<div class="card"><h3>مجوزهای فعال و آینده</h3><div class="tbl"><table>
+<tr><th>کاربر</th><th>نوع</th><th>از</th><th>تا</th><th>به دستور</th><th>علت</th><th>ثبت</th><th></th></tr>
+{% for g, u in active %}
+<tr><td>{% if u %}{{ u.full_name or u.username }} <span class="hint ltr">{{ u.username }}</span>{% else %}?{% endif %}</td><td>{{ kinds.get(g.kind, g.kind) }}{% if g.start <= now %} <span class="badge ok">فعال</span>{% endif %}</td>
+<td>{{ g.start|jdt }}</td><td>{{ g.end|jdt }}</td><td>{{ g.ordered_by }}</td><td class="wrap">{{ g.reason }}</td><td>{{ g.created_by }}</td>
+<td><form method="post" action="/grants/{{ g.id }}/revoke"><button class="btn s">لغو</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">مجوز فعالی نیست</td></tr>{% endfor %}
+</table></div></div>
+
+<div class="card"><h3>مجوزهای گذشته و لغوشده</h3><div class="tbl"><table>
+<tr><th>کاربر</th><th>نوع</th><th>از</th><th>تا</th><th>به دستور</th><th>علت</th><th>ثبت</th><th>وضعیت</th></tr>
+{% for g, u in past %}
+<tr><td>{% if u %}{{ u.full_name or u.username }}{% else %}?{% endif %}</td><td>{{ kinds.get(g.kind, g.kind) }}</td><td>{{ g.start|jdt }}</td><td>{{ g.end|jdt }}</td><td>{{ g.ordered_by }}</td><td class="wrap">{{ g.reason }}</td><td>{{ g.created_by }}</td>
+<td>{% if g.revoked_at %}لغو شد {{ g.revoked_at|jdt }}{% else %}پایان یافت{% endif %}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div></div>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% macro st(s) %}{% if s == 'online' %}<span class="badge ok">آنلاین</span>{% elif s == 'active' %}<span class="badge">فعال</span>{% else %}<span class="badge warn">راکد</span>{% endif %}{% endmacro %}
+{% block content %}
+<div class="top"><h2>دستگاه‌ها</h2><a class="btn" href="/devices/night">سیستم‌های روشن ساعت {{ night_time }}</a></div>
+<div class="grid g3" style="margin-bottom:16px">
+  <div class="card stat"><div class="l">کل دستگاه‌های ثبت‌شده</div><div class="v">{{ counts.all }}</div><div class="hint">سابقه هیچ دستگاهی پاک نمی‌شود</div></div>
+  <div class="card stat"><div class="l">الان روی شبکه</div><div class="v">{{ counts.online }}</div><div class="hint">دیده‌شده در آخرین خواندن روترها</div></div>
+  <div class="card stat"><div class="l">راکد</div><div class="v">{{ counts.stale }}</div><div class="hint">بیش از {{ stale_days }} روز دیده نشده</div></div>
+</div>
+<div class="card">
+<form class="filters" method="get">
+  <div style="min-width:240px"><label>جستجو</label><input name="q" value="{{ q }}" placeholder="MAC، IP، نام کاربری، نام دستگاه، سازنده"></div>
+  <div><label>وضعیت</label><select name="status"><option value="">همه</option>
+    <option value="online" {{ 'selected' if status=='online' }}>آنلاین</option><option value="active" {{ 'selected' if status=='active' }}>فعال (غیر راکد)</option>
+    <option value="stale" {{ 'selected' if status=='stale' }}>راکد</option></select></div>
+  <div><label>نوع</label><select name="type"><option value="">همه</option><option value="computers" {{ 'selected' if type=='computers' }}>همه رایانه‌ها (رایانه، لپ‌تاپ، تین کلاینت، سرور)</option>
+    {% for k, v in DEVICE_TYPES %}<option value="{{ k }}" {{ 'selected' if type==k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>روتر (آخرین)</label><select name="nas"><option value="">همه</option>{% for r in routers %}<option value="{{ r.id }}" {{ 'selected' if nas == r.id|string }}>{{ r.name }}</option>{% endfor %}</select></div>
+  <div><label>در زمان</label><input name="at" value="{{ at }}" class="ltr" placeholder="1404/07/23 14:30"></div>
+  <div><button class="btn p">جستجو</button> <a class="btn" href="/devices">پاک کردن</a></div>
+</form>
+<p class="hint">جستجو در کل سابقه انجام می‌شود: با یک IP معلوم می‌شود کدام دستگاه‌ها و چه زمانی آن را داشته‌اند، با نام کاربری دستگاه‌هایی که کاربر روی آن‌ها وارد شده. «در زمان» نشان می‌دهد در آن لحظه چه دستگاه، IP و کاربری فعال بوده است.</p>
+</div>
+
+{% if hist %}
+<div class="card tbl"><h3>سابقه منطبق{% if at_dt %} در {{ at_dt|jdt }}{% endif %} ({{ hist|length }}{{ '+' if hist|length >= 500 }})</h3><table>
+<tr><th>MAC</th><th>نوع</th><th>مقدار</th><th>روتر</th><th>از</th><th>تا</th><th>مدت</th><th>منبع</th></tr>
+{% for h in hist %}
+<tr><td class="ltr"><a href="/devices/{{ h.mac }}">{{ h.mac }}</a></td><td>{{ 'IP' if h.kind == 'ip' else 'کاربر' }}</td>
+<td class="ltr">{{ h.value }}</td><td>{{ nas_names.get(h.nas_id, '-') }}</td><td>{{ h.first_seen|jdt }}</td>
+<td>{% if now - h.last_seen <= gap %}<span class="badge ok">هم‌اکنون</span>{% else %}{{ h.last_seen|jdt }}{% endif %}</td>
+<td>{{ (h.last_seen - h.first_seen).total_seconds()|duration }}</td><td class="hint">{{ h.source }}</td></tr>
+{% endfor %}
+</table></div>
+{% elif q or at %}<div class="card muted">در سابقه IP / کاربر موردی پیدا نشد.</div>
+{% endif %}
+
+{% set edit = 'devices_edit' in perms %}
+<div class="card tbl"><h3>فهرست دستگاه‌ها ({{ total }})</h3>
+{% if edit %}<form id="bulk" method="post" action="/devices/bulk-type" class="filters" style="display:none;margin-bottom:8px">
+  <input type="hidden" name="back" value="/devices?{{ qs }}">
+  <div><label><b id="bulk-n">0</b> دستگاه انتخاب شده؛ نوع همه:</label><select name="device_type">{% for k, v in DEVICE_TYPES %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+  <div><button class="btn p">ثبت نوع</button></div>
+</form>{% endif %}
+<table>
+<tr>{% if edit %}<th><input type="checkbox" id="all-dev" title="انتخاب همه"></th>{% endif %}<th>MAC</th><th>وضعیت</th><th>IP فعلی / آخرین</th><th>روتر</th><th>نوع</th><th>نام</th><th>کاربر هات‌اسپات / VPN</th><th>آخرین ورود ویندوز (AD)</th><th>سیستم‌عامل</th><th>سازنده</th><th>نام میزبان</th><th>اولین مشاهده</th><th>آخرین مشاهده</th></tr>
+{% for d in items %}
+<tr>{% if edit %}<td><input type="checkbox" class="dev" name="ids" value="{{ d.id }}" form="bulk"></td>{% endif %}
+<td class="ltr"><a href="/devices/{{ d.mac }}">{{ d.mac }}</a>{% if d.random_mac %} <span class="badge warn">تصادفی</span>{% endif %}</td>
+<td>{{ st(state[d.id]) }}</td><td class="ltr">{{ d.last_ip or '-' }}</td><td>{{ nas_names.get(d.last_nas_id, '-') }}</td>
+<td>{% if edit %}<form class="inline" method="post" action="/devices/{{ d.id }}/type"><input type="hidden" name="back" value="/devices?{{ qs }}"><select name="device_type" onchange="this.form.submit()" style="width:auto">
+{% for k, v in DEVICE_TYPES %}<option value="{{ k }}" {{ 'selected' if d.device_type == k }}>{{ v }}</option>{% endfor %}
+</select></form>{% else %}{{ d.device_type|devtype }}{% endif %}</td>
+<td>{{ d.label }}</td><td>{{ d.last_user or '-' }}</td>
+<td>{% if d.logon_user %}{{ d.logon_user }}<div class="hint">{{ d.logon_at|jdt }}</div>{% else %}-{% endif %}</td>
+<td>{{ d.os }}</td><td class="wrap">{{ d.vendor }}</td>
+<td class="ltr">{{ d.hostname }}</td><td>{{ d.first_seen|jdt }}</td><td>{{ d.last_seen|jdt }}</td></tr>
+{% else %}<tr><td colspan="14" class="muted">دستگاهی پیدا نشد</td></tr>{% endfor %}
+</table>
+{% if edit %}<script>
+(function(){const f=document.getElementById('bulk'),n=document.getElementById('bulk-n'),all=document.getElementById('all-dev');
+const boxes=()=>[...document.querySelectorAll('input.dev')];
+function upd(){const k=boxes().filter(b=>b.checked).length;n.textContent=k;f.style.display=k?'flex':'none'}
+boxes().forEach(b=>b.addEventListener('change',upd));all.addEventListener('change',()=>{boxes().forEach(b=>b.checked=all.checked);upd()});})();
+</script>{% endif %}
+{% if pages > 1 %}<div style="margin-top:10px">{% for p in range(1, pages + 1) %}{% if p == page %}<b class="btn s">{{ p }}</b>{% else %}<a class="btn s" href="?q={{ q|urlencode }}&status={{ status }}&nas={{ nas }}&type={{ type }}&at={{ at|urlencode }}&page={{ p }}">{{ p }}</a>{% endif %} {% endfor %}</div>{% endif %}
+</div>
+
+{% if 'devices_edit' in perms %}
+<div class="card"><h3>راکد شدن دستگاه</h3>
+<form method="post" action="/devices/settings" class="filters">
+  <div><label>دستگاهی که این تعداد روز دیده نشود «راکد» است</label><input name="device_stale_days" class="ltr" value="{{ stale_days }}"></div>
+  <div><button class="btn p">ذخیره</button></div>
+</form>
+<p class="hint">دستگاه‌ها و سابقه IP و کاربرانشان هرگز پاک نمی‌شوند؛ فقط وضعیت «راکد» می‌گیرند و اگر دوباره دیده شوند فعال می‌شوند. هر بار که دستگاهی با IP یا کاربر تازه دیده شود یک بازه جدید ثبت می‌شود و تا وقتی پشت سر هم دیده می‌شود (فاصله کمتر از {{ (gap.total_seconds() // 60)|int }} دقیقه) همان بازه ادامه پیدا می‌کند. منبع‌ها: لیست active و host هات‌اسپات، PPP، جدول ARP، DHCP lease و Accounting.</p>
+</div>
+
+<div class="card" id="logon"><h3>ورود کاربران به رایانه‌ها و فهرست شبانه</h3>
+<form method="post" action="/devices/logon-settings">
+<div class="grid g3">
+  <div class="fg"><label>ساعت ثبت فهرست سیستم‌های روشن (هر شب)</label><input name="night_list_time" class="ltr" value="{{ night_time }}" size="6"></div>
+</div>
+<h4>روش ۱: خواندن ورودها از کنترلر دامنه (پیشنهادی)</h4>
+<label><input type="checkbox" name="logon_dc_enabled" value="1" {{ 'checked' if lg.enabled }}> فعال: هر ۲ دقیقه ورودهای ویندوز کاربران دامنه از Security Log کنترلر دامنه خوانده شود</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>کنترلرهای دامنه (هر خط یکی؛ خالی = همان سرور AD)</label><textarea name="logon_dcs" class="ltr" rows="2" placeholder="{{ lg.dcs[0] if lg.dcs else 'Srv-DC.corp.local' }}">{{ lg.dcs_text }}</textarea></div>
+  <div class="fg"><label>وضعیت</label>{% if lg.status %}{% set p = lg.status.split('|') %}<div>آخرین خواندن {{ p[0] }}: {{ p[1] }} ورود، {{ p[2] }} مورد به دستگاه وصل شد</div>{% else %}<div class="hint">هنوز خوانده نشده</div>{% endif %}
+    {% if lg.error %}<div><span class="badge err">خطا</span> <span class="hint ltr">{{ lg.error }}</span></div>{% if lg_hint %}<div class="hint">{{ lg_hint }}</div>{% endif %}{% endif %}</div>
+</div>
+<p class="hint">با همان کاربر سرویس صفحه Active Directory ({{ lg.user or 'تنظیم نشده' }}) خوانده می‌شود. یک بار روی DC: ۱) آن کاربر را عضو گروه <b>Event Log Readers</b> کنید (Active Directory Users and Computers ‹ Builtin). ۲) در فایروال DC گروه قوانین «Remote Event Log Management» را فعال کنید: <span class="ltr">Enable-NetFirewallRule -DisplayGroup "Remote Event Log Management"</span>. ۳) ممیزی ورود Kerberos روشن باشد (در Default Domain Controllers Policy به‌طور پیش‌فرض روشن است: Audit Kerberos Authentication Service = Success). هر ورود ویندوز (و باز کردن قفل) از IP همان رایانه ثبت می‌شود و برنامه از روی سابقه IP/MAC روترها رایانه را پیدا می‌کند.</p>
+<h4>روش ۲: اسکریپت ورود (GPO) — برای رایانه‌ها و تین کلاینت‌هایی که روش ۱ پیدا نمی‌کند</h4>
+{% if lg.script_key %}<p class="hint">در Group Policy: User Configuration ‹ Windows Settings ‹ Scripts ‹ Logon یک فایل <span class="ltr">logon.bat</span> با این خط بگذارید (اگر رایانه‌ها پنل را با آدرس دیگری می‌بینند، آدرس را عوض کنید):</p>
+<div class="code ltr">powershell -NoProfile -WindowStyle Hidden -Command "try{$r=(Invoke-WebRequest -UseBasicParsing ('http://{{ request.url.netloc }}/logon?m=1&amp;k={{ lg.script_key }}&amp;u='+$env:USERNAME+'&amp;c='+$env:COMPUTERNAME)).Content;if($r){$p=$r.Split([char]10,2);Add-Type -AssemblyName PresentationFramework;[System.Windows.MessageBox]::Show($p[1],$p[0],'OK','Information','OK','RtlReading')|Out-Null}}catch{}"</div>
+<p class="hint">همین خط هم ورود را ثبت می‌کند و هم اگر پیامی تنظیم شده باشد (پایین) آن را در یک پنجره برای کاربر نشان می‌دهد.</p>
+<label><input type="checkbox" name="no_key" value="1"> غیرفعال کردن اسکریپت ورود</label>{% else %}<p class="hint">غیرفعال است.</p>{% endif %}
+<label><input type="checkbox" name="new_key" value="1"> {{ 'ساخت کلید تازه (اسکریپت قبلی دیگر کار نمی‌کند)' if lg.script_key else 'فعال کردن اسکریپت ورود (کلید ساخته می‌شود)' }}</label>
+<h4 id="logon-msg">پیام هنگام ورود به ویندوز</h4>
+<input type="hidden" name="logon_msg_form" value="1">
+<label><input type="checkbox" name="logon_msg_enabled" value="1" {{ 'checked' if lm.enabled }}> فعال: بعد از ورود به ویندوز پنجرهٔ پیام برای کاربر باز شود (نیاز به اسکریپت ورود روش ۲)</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>عنوان پنجره</label><input name="logon_msg_title" value="{{ lm.title }}"></div>
+  <div class="fg"><label>نمایش حجم باقی‌ماندهٔ اینترنت</label><select name="logon_msg_quota">{% for k, v in logon_quota_modes.items() %}<option value="{{ k }}" {{ 'selected' if lm.quota == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>حد هشدار مصرف حجم (درصد)</label><input name="quota_warn_pct" class="ltr" size="4" value="{{ warn_pct }}"><div class="hint">در پیام ورود، صفحهٔ «اینترنت من» و صفحهٔ هات‌اسپات نشان داده می‌شود</div></div>
+</div>
+<div class="fg"><label>متن اطلاعیه (خالی = فقط وضعیت حجم)</label><textarea name="logon_message" rows="3" placeholder="مثلاً: سرور فایل امشب از ساعت ۲۲ تا ۲۴ در دسترس نیست.">{{ lm.text }}</textarea></div>
+<div style="margin-top:10px"><button class="btn p">ذخیره</button> <button class="btn" name="test" value="1">ذخیره و تست خواندن از DC</button></div>
+</form>
+</div>
+{% endif %}
+{% endblock %}

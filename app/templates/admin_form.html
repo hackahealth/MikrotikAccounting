@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>{{ 'ویرایش کاربر پنل ' ~ a.username if a and a.id else 'کاربر پنل جدید' }}</h2><a class="btn" href="/admins">بازگشت</a></div>
+<form method="post" action="/admins/save"><input type="hidden" name="id" value="{{ a.id if a and a.id else '' }}">
+<div class="grid g2">
+<div class="card"><h3>مشخصات</h3>
+  <div class="fg"><label>نوع حساب</label><div class="radios">
+    <label><input type="radio" name="source" value="local" {{ 'checked' if not is_ad }}> محلی</label>
+    <label><input type="radio" name="source" value="ldap" {{ 'checked' if is_ad }} {{ 'disabled' if not ad_enabled and not is_ad }}> Active Directory</label></div>
+    <div class="hint">محلی: رمز همین پنل · Active Directory: نام کاربری و رمز دامنه</div>
+    {% if not ad_enabled %}<div class="hint">برای استفاده از حساب‌های AD ابتدا صفحه «Active Directory» را تنظیم کنید.</div>{% endif %}</div>
+  <div class="fg"><label>نام کاربری ورود <span class="hint ad-only">(نام کاربری دامنه؛ از فهرست کاربران AD انتخاب کنید)</span></label>
+    <input name="username" class="ltr" value="{{ a.username if a else '' }}" list="adusers" autocomplete="off">
+    <datalist id="adusers">{% for u in ad_users %}<option value="{{ u.username }}">{{ u.full_name }}</option>{% endfor %}</datalist></div>
+  {% if linked %}<div class="fg ad-only"><label>همان کاربر اینترنت</label><a href="/users/{{ linked.id }}/edit">{{ linked.full_name or linked.username }}</a>
+    <span class="hint">· دفتر: {{ linked.office.name if linked.office else '-' }} · واحد: {{ linked.department.name if linked.department else '-' }}</span></div>{% endif %}
+  <div class="fg"><label>نام و سمت <span class="hint ad-only">(خالی = نام در AD)</span></label><input name="full_name" value="{{ a.full_name if a else '' }}"></div>
+  <div class="fg"><label>نقش</label><select name="role" id="role">
+    {% for k, r in roles.items() %}<option value="{{ k }}" {{ 'selected' if (a and a.role == k) or (not a and k == 'it') }}>{{ r[0] }}</option>{% endfor %}</select></div>
+  <div class="local-only">
+  <div class="fg"><label>رمز عبور {{ '(خالی = بدون تغییر)' if a and a.id and not is_ad }}</label><input name="password" type="text" class="ltr" autocomplete="new-password"></div>
+  <div class="fg"><label><input type="checkbox" name="must_change" value="1" checked> هنگام ورود بعدی رمز را عوض کند</label></div>
+  </div>
+  <p class="hint ad-only">ورود با همان نام کاربری و رمز دامنه انجام می‌شود (مثل ورود به ویندوز). اگر این شخص کاربر اینترنت هم باشد، با همین ورود صفحه «مصرف اینترنت من» هم برایش باز است.</p>
+  <div class="fg"><label><input type="checkbox" name="enabled" value="1" {{ 'checked' if not a or a.enabled }}> فعال</label></div>
+</div>
+<div class="card"><h3>دسترسی‌ها</h3>
+  <div class="fg"><label><input type="checkbox" name="custom_perms" value="1" id="custom" {{ 'checked' if a and a.permissions }}> دسترسی سفارشی (در غیر این صورت دسترسی پیش‌فرض نقش)</label></div>
+  <div class="perm-grid" id="perms">
+  {% for p, label in permissions.items() %}<label><input type="checkbox" name="perm_{{ p }}" value="1" data-p="{{ p }}" {{ 'checked' if p in current }}> {{ label }}</label>{% endfor %}
+  </div>
+  <p class="hint">مدیر سیستم همیشه همه دسترسی‌ها را دارد.</p>
+</div>
+<div class="card" id="scopecard"><h3>محدوده کارکنان (مدیر دفتر / واحد)</h3>
+  <p class="hint">اگر دفتر یا واحدی انتخاب شود، این کاربر فقط کارکنان همان محدوده را می‌بیند و همه دسترسی‌های ویرایشی از او گرفته می‌شود (فقط مشاهده).
+  فقط دفتر = همه کارکنان آن دفتر · فقط واحد = آن واحد در همه دفترها · هر دو = آن واحد در همان دفتر.</p>
+  <div class="ad-only" style="margin-bottom:10px">
+    <label><input type="checkbox" name="scope_own_office" value="1" id="own_office" {{ 'checked' if a and a.scope_own_office }}> دفتر خود این کاربر در AD</label>
+    <label style="margin-right:16px"><input type="checkbox" name="scope_own_department" value="1" id="own_dept" {{ 'checked' if a and a.scope_own_department }}> واحد خود این کاربر در AD</label>
+    <div class="hint">مثلاً مدیر دفتر تهران: نقش «مدیر دفتر / واحد» و «دفتر خود این کاربر». اگر دفتر او در AD عوض شود، محدوده‌اش هم با همگام‌سازی بعدی عوض می‌شود.</div></div>
+  <div class="grid g2">
+  <div class="fg" id="offices_box"><label>دفترها</label><div class="perm-grid">
+    {% for o in all_offices %}<label><input type="checkbox" name="scope_offices" value="{{ o.id }}" {{ 'checked' if o.id in sel_offices }}> {{ o.name }}</label>{% else %}<span class="hint">دفتری تعریف نشده — از منوی «دفترها و واحدها» بسازید.</span>{% endfor %}</div></div>
+  <div class="fg" id="depts_box"><label>واحدها</label><div class="perm-grid">
+    {% for d in all_departments %}<label><input type="checkbox" name="scope_departments" value="{{ d.id }}" {{ 'checked' if d.id in sel_departments }}> {{ d.name }}{% if d.office %} <span class="hint">({{ d.office.name }})</span>{% endif %}</label>{% else %}<span class="hint">واحدی تعریف نشده.</span>{% endfor %}</div></div>
+  </div>
+</div>
+</div>
+<button class="btn p">ذخیره</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+const ROLE_PERMS = {{ roles|tojson }};
+const FORBIDDEN = {{ forbidden|tojson }};
+const role = document.getElementById('role'), custom = document.getElementById('custom');
+function scoped(){ return role.value === 'unit_manager' || document.querySelectorAll('#scopecard input:checked').length > 0; }
+function sync(){
+  const isAdmin = role.value === 'admin';
+  document.getElementById('scopecard').style.display = isAdmin ? 'none' : '';
+  custom.disabled = isAdmin;
+  const editable = custom.checked && !isAdmin;
+  document.querySelectorAll('#perms input').forEach(i => {
+    if (!editable) i.checked = isAdmin || ROLE_PERMS[role.value][1].includes(i.dataset.p);
+    i.disabled = !editable;
+    if (!isAdmin && scoped() && FORBIDDEN.includes(i.dataset.p)) { i.checked = false; i.disabled = true; }
+  });
+}
+function source(){
+  const ad = (document.querySelector('input[name=source]:checked') || {}).value === 'ldap';
+  document.querySelectorAll('.ad-only').forEach(e => e.style.display = ad ? '' : 'none');
+  document.querySelectorAll('.local-only').forEach(e => e.style.display = ad ? 'none' : '');
+  [['own_office', 'offices_box'], ['own_dept', 'depts_box']].forEach(([c, box]) => {
+    const own = ad && document.getElementById(c).checked;
+    document.querySelectorAll('#' + box + ' input').forEach(i => i.disabled = own);
+    document.getElementById(box).style.opacity = own ? .5 : 1;
+  });
+}
+role.onchange = sync; custom.onchange = sync;
+document.querySelectorAll('#scopecard input').forEach(i => i.onchange = () => { sync(); source(); });
+document.querySelectorAll('input[name=source]').forEach(i => i.onchange = source); sync(); source();
+</script>
+{% endblock %}

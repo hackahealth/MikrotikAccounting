@@ -1,0 +1,10 @@
+services:
+  accounting:
+    build: .
+    container_name: mikrotik-accounting
+    restart: unless-stopped
+    # host network: RADIUS must see the real source IP of the router, and UDP ports stay simple
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/data

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>کاربران آنلاین ({{ rows|length }})</h2><span class="hint">سرعت لحظه‌ای از صف‌های روتر · به‌روزرسانی: {{ updated|jdt }}</span></div>
+<div class="card tbl"><table>
+<tr><th>کاربر</th><th>سرویس</th><th>IP</th><th>MAC / مبدأ</th><th>دستگاه</th><th>شروع</th><th>مدت</th><th>سرعت دانلود</th><th>سرعت آپلود</th><th>مصرف این اتصال</th><th>روتر</th><th></th></tr>
+{% for r in rows %}{% set s = r.s %}
+<tr data-id="{{ s.id }}"><td><a href="/reports?preset=today&user_id={{ s.user_id }}">{{ s.username }}</a></td>
+<td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ s.framed_ip }}</td><td class="ltr">{{ s.mac }}</td>
+<td>{{ s.device_type|devtype }} <span class="hint">{{ s.device_os }}</span></td><td>{{ s.start_time|jdt }}</td>
+<td class="dur">{{ r.duration|duration }}</td>
+<td class="ltr down">{{ r.down|rate if r.down is not none else '-' }}</td><td class="ltr up">{{ r.up|rate if r.up is not none else '-' }}</td>
+<td class="ltr bytes">{{ ((s.bytes_in or 0) + (s.bytes_out or 0))|bytes }}</td><td>{{ nas_names.get(s.nas_ip, s.nas_ip) }}{% if s.acct_session_id.startswith('api:') %} <span class="badge" title="این اتصال از لیست active روتر خوانده شده (کاربر محلی روتر یا بدون RADIUS Accounting)">API</span>{% endif %}</td>
+<td>{% if 'live_disconnect' in perms %}<form method="post" action="/live/{{ s.id }}/disconnect" onsubmit="return confirm('اتصال قطع شود؟')"><button class="btn s d">قطع</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="12" class="muted">کسی آنلاین نیست</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
+{% block scripts %}
+<script>
+setInterval(async()=>{try{const r=await fetch('/api/live');const d=await r.json();
+ d.forEach(x=>{const tr=document.querySelector('tr[data-id="'+x.id+'"]');if(!tr)return;
+ tr.querySelector('.down').textContent=x.down;tr.querySelector('.up').textContent=x.up;
+ tr.querySelector('.bytes').textContent=x.bytes;tr.querySelector('.dur').textContent=x.duration;});}catch(e){}},15000);
+</script>
+{% endblock %}

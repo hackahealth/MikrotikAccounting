@@ -1,0 +1,6 @@
+data
+tests
+.pytest_cache
+**/__pycache__
+runtime
+*.zip

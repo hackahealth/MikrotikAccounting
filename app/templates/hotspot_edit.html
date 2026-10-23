@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>{{ 'فایل جدید در' if new else 'ویرایش ' ~ path ~ ' در' }} «{{ pkg.name }}»</h2><a class="btn" href="/hotspot/{{ pkg.id }}/files">بازگشت</a></div>
+<form method="post" action="/hotspot/{{ pkg.id }}/edit" class="card">
+<div class="fg"><label>مسیر فایل</label><input name="path" class="ltr" value="{{ path }}" {{ 'readonly' if not new }} placeholder="login.html"></div>
+<div class="fg"><textarea name="content" rows="28" class="ltr code" spellcheck="false">{{ content }}</textarea></div>
+<button class="btn p">ذخیره در بسته</button>
+<p class="hint">متغیرهای میکروتیک مثل <span class="ltr">$(link-login-only)</span> و <span class="ltr">$(mac-esc)</span> را حذف نکنید.</p>
+</form>
+{% endblock %}

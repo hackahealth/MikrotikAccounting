@@ -1,0 +1,88 @@
+{% set k = rep.kpi %}
+{% macro change(v, inverse=false) %}{% if v is not none %}<small class="{{ ('up' if v > 0 else 'down') if not inverse else ('down' if v > 0 else 'up') }}">{{ '%+.1f'|format(v) }}٪ نسبت به دوره قبل</small>{% else %}<small class="muted">دوره قبل داده ندارد</small>{% endif %}{% endmacro %}
+<div class="grid g4">
+  <div class="card stat kpi"><div class="l">مجموع مصرف</div><div class="v ltr">{{ k.total|bytes }}</div><div class="hint">{{ change(k.total_change) }}</div></div>
+  <div class="card stat kpi"><div class="l">مصرف اینترنت کاربران</div><div class="v ltr">{{ k.internet|bytes }}</div><div class="hint">{{ k.internet_pct }}٪ از کل مصرف{% if not rep.has_flow %} · <span class="muted">بدون Traffic-Flow همه اینترنت حساب شده</span>{% endif %}</div></div>
+  <div class="card stat kpi"><div class="l">مصرف داخل شبکه</div><div class="v ltr">{{ k.internal|bytes }}</div><div class="hint">سرورها و شبکه داخلی همین دفتر</div></div>
+  <div class="card stat kpi"><div class="l">تانل (شبکه دفاتر دیگر)</div><div class="v ltr">{{ k.tunnel|bytes }}</div><div class="hint">از بستر اینترنت؛ از حجم بسته کاربران کم نمی‌شود</div></div>
+</div>
+{% set rt = rep.routers %}
+{% if rt and rt.rows %}
+<div class="grid g3">
+  <div class="card stat kpi"><div class="l">کل اینترنت واقعی (شمارنده اینترفیس WAN روترها)</div><div class="v ltr">{{ rt.total.wan|bytes }}</div><div class="hint">دانلود <span class="ltr">{{ rt.total.wan_rx|bytes }}</span> · آپلود <span class="ltr">{{ rt.total.wan_tx|bytes }}</span>{% if not rt.configured %} · <span class="muted">اینترفیس WAN روترها تعیین نشده</span>{% endif %}</div></div>
+  <div class="card stat kpi"><div class="l">تانل (شمارنده اینترفیس‌های تانل)</div><div class="v ltr">{{ rt.total.tunnel|bytes }}</div><div class="hint">بخشی از همان اینترنت که حامل تانل به دفاتر دیگر است</div></div>
+  <div class="card stat kpi"><div class="l">اینترنت منهای تانل</div><div class="v ltr">{{ rt.total.pure|bytes }}</div><div class="hint">مصرف واقعی اینترنت (وب و ...) همهٔ دستگاه‌ها، با یا بدون هات‌اسپات</div></div>
+</div>
+<div class="card"><h3>به تفکیک روتر / دفتر (از شمارنده اینترفیس‌ها، مستقل از کاربر)</h3><div class="tbl"><table>
+<tr><th>روتر</th><th>اینترفیس WAN</th><th>کل اینترنت</th><th>دانلود</th><th>آپلود</th><th>تانل</th><th>اینترنت منهای تانل</th><th>سهم از کل</th></tr>
+{% for r in rt.rows %}<tr><td>{{ r.name }}</td><td class="ltr">{{ r.wan_ifs|join(', ') or '-' }}{% if r.tun_ifs %}<div class="hint">تانل: {{ r.tun_ifs|join(', ') }}</div>{% endif %}</td>
+<td class="ltr">{{ r.wan|bytes }}</td><td class="ltr">{{ r.wan_rx|bytes }}</td><td class="ltr">{{ r.wan_tx|bytes }}</td><td class="ltr">{{ r.tunnel|bytes }}</td><td class="ltr">{{ r.pure|bytes }}</td>
+<td>{{ (100 * r.wan / rt.total.wan)|round(1) if rt.total.wan else 0 }}٪</td></tr>{% endfor %}
+</table></div><p class="hint">این اعداد از شمارنده بایت اینترفیس‌ها (API روتر، هر دقیقه) است و همهٔ دستگاه‌ها را شامل می‌شود؛ اعداد بالای کاربران فقط ترافیک کاربران هات‌اسپات / VPN است. اینترفیس WAN و تانل در فرم هر روتر تعیین می‌شود.</p></div>
+{% endif %}
+<div class="grid g4">
+  <div class="card stat kpi"><div class="l">مجموع ساعات آنلاین</div><div class="v">{{ k.online_h }}</div><div class="hint">{{ change(k.online_change) }}</div></div>
+  <div class="card stat kpi"><div class="l">میانگین هر کاربر</div><div class="v ltr">{{ k.per_user|bytes }}</div><div class="hint">{{ k.online_per_user_h }} ساعت آنلاین · {{ k.sessions }} اتصال در کل</div></div>
+  <div class="card stat"><div class="l">مصرف در ساعات کاری</div><div class="v">{{ k.work_pct }}٪</div><div class="hint">داخل: <span class="ltr">{{ k.work_bytes|bytes }}</span> · خارج: <span class="ltr">{{ k.off_bytes|bytes }}</span></div></div>
+  <div class="card stat"><div class="l">ترافیک تفریحی در ساعات کاری</div><div class="v">{{ (k.leisure_work_pct ~ '٪') if k.leisure_work_pct is not none else '-' }}</div><div class="hint">فیلم، موسیقی، شبکه اجتماعی، بازی · <span class="ltr">{{ k.leisure_work|bytes }}</span></div></div>
+</div>
+<div class="grid g3">
+  <div class="card stat kpi"><div class="l">کاربران فعال</div><div class="v">{{ k.users }}</div><div class="hint">{{ change(k.users_change, true) }}</div></div>
+  <div class="card stat"><div class="l">اوج مصرف</div><div class="v ltr">{{ ('%02d:00'|format(k.peak_hour)) if k.peak_hour is not none else '-' }}</div><div class="hint">پرمصرف‌ترین روز: {{ k.peak_day.day|jdate if k.peak_day else '-' }}</div></div>
+  <div class="card stat"><div class="l">رویدادهای سیاست</div><div class="v">{{ k.rejects }}</div><div class="hint">ورود ناموفق · {{ k.quota_users }} کاربر با حجم تمام‌شده</div></div>
+</div>
+<div class="grid g2">
+  <div class="card"><h3>روند مصرف روزانه (اینترنت / تانل / داخل شبکه)</h3><div class="chart"><canvas id="m_daily"></canvas></div></div>
+  <div class="card"><h3>مصرف بر حسب ساعت شبانه‌روز</h3><div class="chart"><canvas id="m_hour"></canvas></div><p class="hint">ساعات کاری: <span class="ltr">{{ rep.work_hours }}</span></p></div>
+</div>
+<div class="grid g2">
+  <div class="card"><h3>مصرف به تفکیک گروه</h3><div class="tbl"><table>
+    <tr><th>گروه</th><th>کاربران</th><th>مصرف</th><th>سهم</th><th>میانگین هر نفر</th><th>ساعات آنلاین</th></tr>
+    {% for g in rep.by_group %}<tr><td>{{ g.name }}</td><td>{{ g.users }}</td><td class="ltr">{{ g.bytes|bytes }}</td><td>{{ g.share }}٪</td><td class="ltr">{{ g.per_user|bytes }}</td><td>{{ g.online_h }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">-</td></tr>{% endfor %}</table></div>
+  {% for title, rows in [('دفتر', rep.by_office), ('واحد', rep.by_department)] if rows %}
+    <h3 style="margin-top:14px">مصرف به تفکیک {{ title }}</h3><div class="tbl"><table>
+    <tr><th>{{ title }}</th><th>کاربران</th><th>مصرف</th><th>سهم</th><th>میانگین هر نفر</th><th>ساعات آنلاین</th></tr>
+    {% for g in rows %}<tr><td>{{ g.name }}</td><td>{{ g.users }}</td><td class="ltr">{{ g.bytes|bytes }}</td><td>{{ g.share }}٪</td><td class="ltr">{{ g.per_user|bytes }}</td><td>{{ g.online_h }}</td></tr>{% endfor %}</table></div>
+  {% endfor %}</div>
+  <div class="card"><h3>نوع استفاده</h3>
+    {% if rep.categories %}<div class="chart" style="height:220px"><canvas id="m_cat"></canvas></div>
+    <div class="tbl"><table><tr><th>نوع</th><th>مصرف</th><th>سهم</th><th>در ساعات کاری</th></tr>
+    {% for c in rep.categories %}<tr><td>{{ c.name }}</td><td class="ltr">{{ c.bytes|bytes }}</td><td>{{ c.pct }}٪</td><td class="ltr">{{ c.work|bytes }}</td></tr>{% endfor %}</table></div>
+    {% else %}<p class="muted">داده Traffic-Flow برای این دوره وجود ندارد.</p>{% endif %}</div>
+</div>
+<div class="card"><h3>پرمصرف‌ترین کاربران</h3><div class="tbl"><table>
+  <tr><th>#</th><th>کاربر</th><th>نام</th><th>دفتر / واحد</th><th>مصرف</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>سهم از کل</th><th>ساعات آنلاین</th><th>بیشترین نوع استفاده</th><th>تفریحی در ساعات کاری</th></tr>
+  {% for u in rep.top_users[:20] %}<tr><td>{{ loop.index }}</td><td class="ltr">{{ u.username }}</td><td>{{ u.full_name }}</td><td>{{ u.office }}{{ ' / ' if u.office and u.department }}{{ u.department }}{{ u.group if not u.office and not u.department }}</td>
+  <td class="ltr">{{ u.total|bytes }}</td><td class="ltr">{{ u.internet|bytes }}</td><td class="ltr">{{ u.tunnel|bytes }}</td><td class="ltr">{{ u.internal|bytes }}</td><td>{{ u.share }}٪</td><td>{{ u.online_h }}</td><td>{{ u.top_category or '-' }}</td>
+  <td>{% if u.leisure_work_pct is not none %}<span class="badge {{ 'err' if u.leisure_work_pct >= 40 else ('warn' if u.leisure_work_pct >= 20 else 'ok') }}">{{ u.leisure_work_pct }}٪</span>{% else %}-{% endif %}</td></tr>
+  {% else %}<tr><td colspan="11" class="muted">-</td></tr>{% endfor %}</table></div></div>
+<div class="grid g2">
+  <div class="card"><h3>پرمصرف‌ترین سایت‌ها و سرویس‌ها</h3><div class="tbl"><table>
+    <tr><th>سایت / سرویس</th><th>نوع</th><th>مصرف</th><th>کاربران</th></tr>
+    {% for d in rep.domains %}<tr><td class="ltr">{{ d.domain }}</td><td>{{ d.category }}</td><td class="ltr">{{ d.bytes|bytes }}</td><td>{{ d.users }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">-</td></tr>{% endfor %}</table></div></div>
+  <div class="card"><h3>دستگاه‌ها و سرویس‌ها</h3><div class="tbl"><table>
+    <tr><th>نوع</th><th>اتصال</th><th>کاربران</th><th>مصرف</th></tr>
+    {% for d in rep.devices %}<tr><td>{{ d.name }}</td><td>{{ d.sessions }}</td><td>{{ d.users }}</td><td class="ltr">{{ d.bytes|bytes }}</td></tr>{% endfor %}
+    {% for s in rep.services %}<tr><td>{{ s.name }}</td><td>{{ s.sessions }}</td><td>-</td><td class="ltr">{{ s.bytes|bytes }}</td></tr>{% endfor %}
+    </table></div>
+    <h3 style="margin-top:14px">ورودهای ناموفق</h3><div class="tbl"><table><tr><th>علت</th><th>تعداد</th><th>کاربران</th></tr>
+    {% for r in rep.rejects %}<tr><td class="wrap">{{ r.reason }}</td><td>{{ r.count }}</td><td>{{ r.users }}</td></tr>{% else %}<tr><td colspan="3" class="muted">موردی نیست</td></tr>{% endfor %}</table></div>
+  </div>
+</div>
+{% if calls and calls.calls %}{% set st = calls.stats %}
+<div class="card"><h3>تماس‌های تلفنی (ایزابل)</h3>
+<div class="grid g4">
+  <div class="stat"><div class="l">ورودی</div><div class="v">{{ st['in'].count }}</div><div class="hint">بی‌پاسخ {{ st['in'].count - st['in'].answered }} · بدون تماس برگشت {{ calls.missed_count }}</div></div>
+  <div class="stat"><div class="l">خروجی</div><div class="v">{{ st.out.count }}</div><div class="hint">پاسخ‌داده {{ st.out.answered }}</div></div>
+  <div class="stat"><div class="l">مجموع مکالمه</div><div class="v">{{ calls.talk|duration }}</div><div class="hint">میانگین <span class="ltr">{{ calls.avg_talk|mmss }}</span> دقیقه</div></div>
+  <div class="stat"><div class="l">میانگین انتظار تا پاسخ</div><div class="v">{{ calls.avg_ring }}<small> ثانیه</small></div><div class="hint">داخلی بین همکاران {{ st.internal.count }}</div></div>
+</div>
+<div class="grid g2">{% for title, rows in [('دفتر', calls.offices), ('واحد', calls.departments)] %}
+  <div class="tbl"><h4>به تفکیک {{ title }}</h4><table><tr><th>{{ title }}</th><th>نفرات</th><th>ورودی</th><th>بی‌پاسخ</th><th>خروجی</th><th>مکالمه</th></tr>
+  {% for e in rows %}<tr><td>{{ e.name }}</td><td>{{ e.people }}</td><td>{{ e['in'] }}</td><td>{{ e.missed }}</td><td>{{ e.out }}</td><td>{{ e.talk|duration }}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">داخلی‌ها هنوز به کارکنان تخصیص داده نشده‌اند</td></tr>{% endfor %}</table></div>{% endfor %}
+</div>
+{% if not printing %}<p class="hint"><a href="/calls?{{ qs }}">گزارش کامل تماس‌ها</a></p>{% endif %}
+</div>{% endif %}

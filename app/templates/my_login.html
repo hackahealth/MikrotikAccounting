@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مصرف اینترنت من</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="login card">
+<h3>مصرف اینترنت من</h3>
+<p class="hint">با همان نام کاربری و رمزی که به اینترنت (هات‌اسپات یا VPN) وصل می‌شوید وارد شوید تا مصرف، حجم باقی‌مانده و اتصال‌هایتان را ببینید و رمزتان را عوض کنید.</p>
+{% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
+<form method="post" action="/my/login">
+<div class="fg"><label>نام کاربری</label><input name="username" class="ltr" autofocus autocomplete="username"></div>
+<div class="fg"><label>رمز عبور</label><input name="password" type="password" class="ltr" autocomplete="current-password"></div>
+<button class="btn p">ورود</button>
+</form></div></body></html>

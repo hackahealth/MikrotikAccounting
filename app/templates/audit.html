@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>لاگ فعالیت کاربران پنل</h2>
+<form class="filters" method="get"><div><input name="q" value="{{ q }}" placeholder="کاربر، عملیات یا جزئیات"></div><div><button class="btn">جستجو</button></div></form></div>
+<div class="card tbl"><table>
+<tr><th>زمان</th><th>کاربر پنل</th><th>عملیات</th><th>جزئیات</th><th>IP</th></tr>
+{% for l in items %}<tr><td>{{ l.ts|jdt }}</td><td class="ltr">{{ l.username }}</td><td>{{ l.action }}</td><td class="wrap">{{ l.detail }}</td><td class="ltr">{{ l.ip }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

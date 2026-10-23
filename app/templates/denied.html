@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card"><h3>دسترسی ندارید</h3><p>نقش شما ({{ ROLES[me.role][0] if me else '' }}) به این بخش دسترسی ندارد. در صورت نیاز با مدیر سیستم تماس بگیرید.</p>
+<a class="btn" href="javascript:history.back()">بازگشت</a></div>
+{% endblock %}

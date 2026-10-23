@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>بروزرسانی فولدر hotspot روترها</h2></div>
+<div class="grid g2">
+<div class="card"><h3>۱. بارگذاری بسته جدید</h3>
+<form method="post" action="/hotspot/upload" enctype="multipart/form-data">
+  <div class="fg"><label>فایل ZIP فولدر hotspot (login.html و بقیه فایل‌ها؛ اگر داخل پوشه hotspot باشند هم مشکلی نیست)</label><input type="file" name="file" accept=".zip"></div>
+  <div class="grid g2">
+    <div class="fg"><label>نام بسته</label><input name="name" placeholder="صفحه ورود جدید - مهر"></div>
+    <div class="fg"><label>توضیح</label><input name="note"></div>
+  </div>
+  <div class="fg"><label><input type="checkbox" name="inject" value="1" checked> افزودن خودکار کد تشخیص دستگاه (User-Agent) به login.html و alogin.html و نوار هشدار حجم به alogin.html و status.html</label></div>
+  <div class="fg"><label>آدرس این سرور از دید کاربران هات‌اسپات</label><input name="public_url" class="ltr" value="{{ public_url }}"></div>
+  <button class="btn p">بارگذاری</button>
+</form></div>
+
+<div class="card"><h3>۲. نصب روی روترها</h3>
+<form method="post" action="/hotspot/deploy" onsubmit="return confirm('فایل‌ها روی روترهای انتخاب‌شده نوشته شوند؟')">
+  <div class="fg"><label>بسته</label><select name="package_id">{% for p in pkgs %}<option value="{{ p.id }}">{{ p.name }} ({{ p.files }} فایل{{ '، پشتیبان' if p.kind == 'backup' }})</option>{% else %}<option value="">ابتدا بسته‌ای بارگذاری کنید</option>{% endfor %}</select></div>
+  <div class="fg"><label>روترها</label><div class="perm-grid">{% for n in routers %}<label><input type="checkbox" name="nas_ids" value="{{ n.id }}"> {{ n.name }} <span class="hint ltr">{{ n.api_host or n.ip }}</span></label>{% else %}<span class="hint">روتری ثبت نشده</span>{% endfor %}</div></div>
+  <div class="fg"><label>مسیر مقصد (خالی = طبق تنظیم هر روتر / تشخیص خودکار)</label><input name="directory" class="ltr" placeholder="hotspot"></div>
+  <div class="fg"><label><input type="checkbox" name="backup" value="1" checked> قبل از نصب، از فولدر فعلی هر روتر پشتیبان گرفته شود</label></div>
+  <div class="fg"><label><input type="checkbox" name="mirror" value="1"> فایل‌هایی که در بسته نیستند از روتر حذف شوند (همسان‌سازی کامل)</label></div>
+  <button class="btn p">نصب</button>
+</form>
+<p class="hint">انتقال با FTP یا SFTP و با همان کاربر API روتر انجام می‌شود (کاربر باید دسترسی ftp داشته باشد؛ اسکریپت mikrotik/setup.rsc این را تنظیم می‌کند). تغییر فایل‌ها بلافاصله در صفحه ورود هات‌اسپات دیده می‌شود.</p>
+</div>
+</div>
+
+<div class="card"><h3>بسته‌ها و پشتیبان‌ها</h3><div class="tbl"><table>
+<tr><th>نام</th><th>نوع</th><th>فایل‌ها</th><th>حجم</th><th>توسط</th><th>زمان</th><th>توضیح</th><th></th></tr>
+{% for p in pkgs %}<tr><td>{{ p.name }}</td><td>{% if p.kind == 'backup' %}<span class="badge warn">پشتیبان {{ nas_names.get(p.nas_id, '') }}</span>{% else %}<span class="badge">بارگذاری</span>{% endif %}</td>
+<td>{{ p.files }}</td><td class="ltr">{{ p.size|bytes }}</td><td>{{ p.created_by }}</td><td>{{ p.created_at|jdt }}</td><td>{{ p.note }}</td>
+<td><a class="btn s" href="/hotspot/{{ p.id }}/files">فایل‌ها / ویرایش</a> <a class="btn s" href="/hotspot/{{ p.id }}/download">دانلود ZIP</a>
+<form class="inline" method="post" action="/hotspot/{{ p.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">هنوز بسته‌ای نیست</td></tr>{% endfor %}
+</table></div><p class="hint">برای بازگرداندن نسخه قبلی، پشتیبان همان روتر را در بخش «نصب روی روترها» انتخاب و نصب کنید.</p></div>
+
+<div class="card"><h3>روترها و روش انتقال فایل</h3>
+<form method="post" action="/hotspot/settings"><div class="tbl"><table>
+<tr><th>روتر</th><th>روش</th><th>پورت</th><th>مسیر فولدر (خالی = خودکار)</th><th>مسیر تشخیص‌داده‌شده</th><th></th></tr>
+{% for n in routers %}<tr><td>{{ n.name }} <span class="hint ltr">{{ n.api_host or n.ip }}</span></td>
+<td><select name="proto_{{ n.id }}"><option value="ftp">FTP</option><option value="sftp" {{ 'selected' if n.file_proto == 'sftp' }}>SFTP</option></select></td>
+<td><input name="port_{{ n.id }}" class="ltr" style="width:70px" value="{{ n.file_port or '' }}"></td>
+<td><input name="dir_{{ n.id }}" class="ltr" value="{{ n.hotspot_dir or '' }}" placeholder="hotspot"></td>
+<td class="ltr">{{ detected.get(n.id|string, '') }}</td>
+<td><button class="btn s" formaction="/hotspot/detect" name="nas_id" value="{{ n.id }}">تشخیص مسیر</button>
+<button class="btn s" formaction="/hotspot/backup" name="nas_id" value="{{ n.id }}">پشتیبان / دانلود فولدر فعلی</button></td></tr>
+{% endfor %}</table></div>
+<button class="btn">ذخیره تنظیمات</button></form></div>
+
+<div class="card"><h3>سابقه نصب</h3><div class="tbl"><table>
+<tr><th>زمان</th><th>روتر</th><th>بسته</th><th>مسیر</th><th>نتیجه</th><th>توسط</th></tr>
+{% for l in logs %}<tr><td>{{ l.ts|jdt }}</td><td>{{ nas_names.get(l.nas_id, '-') }}</td><td>{{ pkg_names.get(l.package_id, '(حذف‌شده)') }}</td>
+<td class="ltr">{{ l.target_dir }}</td><td>{% if l.ok %}<span class="badge ok">موفق</span>{% else %}<span class="badge err">ناموفق</span>{% endif %} {{ l.message }}</td><td>{{ l.username }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">-</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3>کد تشخیص دستگاه برای صفحه ورود</h3><p class="hint">اگر فایل‌ها را دستی ویرایش می‌کنید، این خط را قبل از &lt;/body&gt; در login.html بگذارید:</p>
+<pre class="ltr code">{{ beacon }}</pre></div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>ورودهای ناموفق و قفل</h2>
+<form class="filters" method="get"><div><select name="hours" onchange="this.form.submit()">{% for h, t in ((1, '۱ ساعت'), (24, '۲۴ ساعت'), (168, '۷ روز'), (720, '۳۰ روز')) %}<option value="{{ h }}" {{ 'selected' if hours == h }}>{{ t }} اخیر</option>{% endfor %}</select></div></form></div>
+
+<div class="grid g3">
+  <div class="card stat"><div class="l">ورود ناموفق</div><div class="v">{{ f.total|fa }}</div></div>
+  <div class="card stat"><div class="l">قفل فعال</div><div class="v">{{ locks|length|fa }}</div></div>
+  <div class="card stat"><div class="l">قانون قفل خودکار</div><div class="v" style="font-size:16px">{% if rules.count %}{{ rules.count|fa }} بار در {{ rules.hours|fa }} ساعت{% else %}خاموش{% endif %}</div></div>
+</div>
+
+<div class="card"><h3>قفل‌های فعال</h3><div class="tbl"><table>
+<tr><th>نوع</th><th>مقدار</th><th>علت</th><th>توسط</th><th>از</th><th>تا</th><th></th></tr>
+{% for lk in locks %}
+<tr><td>{{ kinds[lk.kind] }}</td><td class="ltr">{{ lk.value }}</td><td class="wrap">{{ lk.reason }}{% if lk.auto %} <span class="badge warn">خودکار</span>{% endif %}</td>
+<td>{{ lk.created_by }}</td><td>{{ lk.created_at|jdt }}</td><td>{{ lk.until|jdt if lk.until else 'باز کردن دستی' }}</td>
+<td><form method="post" action="/security/{{ lk.id }}/unlock"><button class="btn s">باز کردن قفل</button></form></td></tr>
+{% else %}<tr><td colspan="7" class="muted">قفلی نیست</td></tr>{% endfor %}
+</table></div>
+<h4>قفل دستی</h4>
+<form method="post" action="/security/lock" class="filters">
+<div><select name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+<div><input name="value" class="ltr" placeholder="نام کاربری / MAC / IP" required></div>
+<div><input name="reason" placeholder="علت"></div>
+<div><input name="hours" class="ltr" size="4" placeholder="ساعت"> <span class="hint">خالی = تا باز کردن دستی</span></div>
+<div><button class="btn p">قفل کن</button></div></form>
+<p class="hint">کاربر، MAC یا IP قفل‌شده نه به هات‌اسپات وصل می‌شود نه VPN؛ اتصال فعالش هم در دور بعدی کنترل (حداکثر یک دقیقه) قطع می‌شود.</p></div>
+
+<div class="grid g2">
+<div class="card"><h3>ورود ناموفق بر حسب کاربر</h3><div class="tbl"><table>
+<tr><th>کاربر</th><th>دفعات</th><th>مبدأ</th><th>آخرین</th><th></th></tr>
+{% for name, n, last, srcs in f.by_user %}
+<tr><td class="ltr">{{ name }}</td><td>{{ n }}</td><td>{{ srcs }}</td><td>{{ last|jdt }}</td>
+<td>{% if ('user', (name or '')|lower) in locked_vals %}<span class="badge err">قفل</span>{% elif name %}<form method="post" action="/security/lock"><input type="hidden" name="kind" value="user"><input type="hidden" name="value" value="{{ name }}"><input type="hidden" name="reason" value="{{ n }} ورود ناموفق"><input type="hidden" name="back" value="/security?hours={{ hours }}"><button class="btn s">قفل</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div></div>
+<div class="card"><h3>ورود ناموفق بر حسب مبدأ (MAC / IP)</h3><div class="tbl"><table>
+<tr><th>مبدأ</th><th>دفعات</th><th>کاربرها</th><th>آخرین</th><th></th></tr>
+{% for src, n, last, users in f.by_src %}{% set sk = source_kind(src) %}
+<tr><td class="ltr">{{ src }}</td><td>{{ n }}</td><td>{{ users }}</td><td>{{ last|jdt }}</td>
+<td>{% if sk[0] and (sk[0], sk[1]|lower) in locked_vals %}<span class="badge err">قفل</span>{% elif sk[0] %}<form method="post" action="/security/lock"><input type="hidden" name="kind" value="{{ sk[0] }}"><input type="hidden" name="value" value="{{ sk[1] }}"><input type="hidden" name="reason" value="{{ n }} ورود ناموفق"><input type="hidden" name="back" value="/security?hours={{ hours }}"><button class="btn s">قفل</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div></div>
+</div>
+
+<div class="card"><h3>آخرین ورودهای ناموفق</h3><div class="tbl" style="max-height:420px;overflow:auto"><table>
+<tr><th>زمان</th><th>کاربر</th><th>علت</th><th>سرویس</th><th>مبدأ</th><th>روتر</th></tr>
+{% for l in f.recent %}
+<tr><td>{{ l.ts|jdt }}</td><td class="ltr">{{ l.username }}</td><td class="wrap">{{ l.reason }}</td><td>{{ 'هات‌اسپات' if l.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ l.mac }}</td><td class="ltr">{{ l.nas_ip }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div></div>
+
+<div class="card" id="rules"><h3>قانون قفل خودکار</h3>
+<form method="post" action="/security/rules">
+<div class="grid g3">
+<div class="fg"><label>تعداد رمز اشتباه (۰ = خاموش)</label><input name="lock_fail_count" class="ltr" value="{{ rules.count }}"></div>
+<div class="fg"><label>در بازهٔ (ساعت)</label><input name="lock_fail_hours" class="ltr" value="{{ rules.hours }}"></div>
+<div class="fg"><label>مدت قفل (دقیقه؛ ۰ = تا باز کردن دستی)</label><input name="lock_minutes" class="ltr" value="{{ rules.minutes }}"></div>
+</div>
+<label><input type="checkbox" name="lock_source" value="1" {{ 'checked' if rules.lock_source }}> مبدأ (MAC هات‌اسپات / IP کلاینت VPN) هم با همین قانون قفل شود</label>
+<p class="hint">با هر قفل خودکار، هشدار برای مدیر سیستم و کارشناس IT در صفحهٔ «هشدارها» ثبت می‌شود.</p>
+<button class="btn p">ذخیره</button></form></div>
+
+{% if old %}<div class="card"><h3>قفل‌های باز شده (۵۰ مورد آخر)</h3><div class="tbl"><table>
+<tr><th>نوع</th><th>مقدار</th><th>علت</th><th>قفل</th><th>باز شد</th></tr>
+{% for lk in old %}<tr><td>{{ kinds[lk.kind] }}</td><td class="ltr">{{ lk.value }}</td><td class="wrap">{{ lk.reason }}</td><td>{{ lk.created_at|jdt }} {{ lk.created_by }}</td><td>{{ lk.released_at|jdt }} {{ lk.released_by }}</td></tr>{% endfor %}
+</table></div></div>{% endif %}
+{% endblock %}

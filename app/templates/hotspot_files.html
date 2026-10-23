@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>فایل‌های بسته «{{ pkg.name }}»</h2><div><a class="btn p" href="/hotspot/{{ pkg.id }}/edit?path=">+ فایل جدید</a> <a class="btn" href="/hotspot">بازگشت</a></div></div>
+<div class="card tbl"><table><tr><th>مسیر</th><th>حجم</th><th></th></tr>
+{% for p, size in files %}<tr><td class="ltr">{{ p }}</td><td class="ltr">{{ size|bytes }}</td>
+<td>{% if ext(p) in text_ext %}<a class="btn s" href="/hotspot/{{ pkg.id }}/edit?path={{ p|urlencode }}">ویرایش</a>{% endif %}</td></tr>{% endfor %}
+</table></div>
+<p class="hint">پس از ویرایش، بسته را از صفحه قبل روی روترها نصب کنید.</p>
+{% endblock %}

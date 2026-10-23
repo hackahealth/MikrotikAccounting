@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مصرف اینترنت من</title><link rel="stylesheet" href="/static/style.css"><script src="/static/chart.umd.js"></script>
+<style>.mywrap{max-width:1100px;margin:0 auto;padding:20px 16px}.bar.big{height:10px;margin:10px 0 6px}.kv td:first-child{color:var(--muted);width:40%}</style>
+</head>
+<body><div class="mywrap">
+<div class="top"><h2>سلام {{ u.full_name or u.username }} <span class="hint ltr">{{ u.username }}</span></h2>
+<div><a class="btn" href="#" data-tour="help" onclick="Tour.start();return false">راهنما</a> <a class="btn" href="#password">تغییر رمز</a> <a class="btn" href="/my/logout">خروج</a></div></div>
+{% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
+{% if warn %}<div class="flash {{ 'err' if warn.level == 'err' else 'warn' }}" id="quota-warn">{{ warn.text }}</div>{% endif %}
+
+<div class="grid g4">
+  <div class="card stat" data-tour="status"><div class="l">وضعیت حساب</div><div class="v"><span class="badge {{ status_kind }}" style="font-size:16px">{{ status }}</span></div>
+    <div class="hint">{% if online %}اکنون {{ online|length }} اتصال فعال{% else %}اکنون آنلاین نیستید{% endif %}</div></div>
+  <div class="card stat" data-tour="quota"><div class="l">حجم باقی‌مانده ({{ period }})</div>
+    {% if quota %}<div class="v ltr">{{ remaining|bytes }}</div>
+    <div class="bar big"><i class="{{ 'hi' if pct >= 90 }}" style="width:{{ pct }}%"></i></div>
+    <div class="hint">مصرف <span class="ltr">{{ used|bytes }}</span> از <span class="ltr">{{ quota|bytes }}</span> ({{ pct }}٪)</div>
+    {% else %}<div class="v">نامحدود</div><div class="hint">مصرف دوره <span class="ltr">{{ used|bytes }}</span></div>{% endif %}</div>
+  <div class="card stat" data-tour="today"><div class="l">مصرف امروز</div><div class="v ltr">{{ (day.internet + day.tunnel + day.internal)|bytes }}</div>
+    <div class="hint">اینترنت <span class="ltr">{{ day.internet|bytes }}</span> · تانل <span class="ltr">{{ day.tunnel|bytes }}</span> · داخل شبکه <span class="ltr">{{ day.internal|bytes }}</span></div></div>
+  <div class="card stat"><div class="l">مصرف این ماه</div><div class="v ltr">{{ (month.internet + month.tunnel + month.internal)|bytes }}</div>
+    <div class="hint">اینترنت <span class="ltr">{{ month.internet|bytes }}</span> · تانل <span class="ltr">{{ month.tunnel|bytes }}</span> · داخل شبکه <span class="ltr">{{ month.internal|bytes }}</span></div></div>
+</div>
+
+<div class="grid g2">
+  <div class="card" data-tour="daily"><h3>مصرف روزانه (۳۰ روز اخیر)</h3><div class="chart"><canvas id="daily"></canvas></div>
+    <div class="tbl" style="max-height:260px;overflow:auto;margin-top:10px"><table><tr><th>تاریخ</th><th>اینترنت</th><th>تانل</th><th>داخل شبکه</th><th>مجموع</th></tr>
+    {% for d in rep.split.daily|reverse %}<tr><td>{{ d.day|jdate }}</td><td class="ltr">{{ d.internet|bytes }}</td><td class="ltr">{{ d.tunnel|bytes }}</td><td class="ltr">{{ d.internal|bytes }}</td><td class="ltr">{{ (d.internet + d.tunnel + d.internal)|bytes }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">در ۳۰ روز اخیر مصرفی ثبت نشده</td></tr>{% endfor %}</table></div></div>
+  <div class="card" data-tour="info"><h3>مشخصات حساب</h3><div class="tbl"><table class="kv">
+    <tr><td>گروه</td><td>{{ u.group.name if u.group else '-' }}</td></tr>
+    <tr><td>سرعت مجاز (آپلود/دانلود)</td><td class="ltr">{{ eff.rate_limit or 'بدون محدودیت' }}</td></tr>
+    <tr><td>سهمیه حجم</td><td>{{ (quota|bytes ~ ' ' ~ period) if quota else 'نامحدود' }}</td></tr>
+    <tr><td>ساعات مجاز اتصال</td><td class="ltr">{{ eff.allowed_hours or 'همه ساعات' }}</td></tr>
+    <tr><td>تعداد اتصال همزمان</td><td>{{ eff.simultaneous_use or 'نامحدود' }}</td></tr>
+    <tr><td>تاریخ انقضا</td><td>{{ u.expire_at|jdate if u.expire_at else 'ندارد' }}</td></tr>
+    <tr><td>سرویس‌ها</td><td>{{ 'هات‌اسپات' if eff.allow_hotspot }}{{ ' و ' if eff.allow_hotspot and eff.allow_vpn }}{{ 'VPN' if eff.allow_vpn }}</td></tr>
+    {% if u.mobile %}<tr><td>موبایل</td><td class="ltr">{{ u.mobile }}</td></tr>{% endif %}
+    {% if u.office or u.department %}<tr><td>دفتر / واحد</td><td>{{ u.office.name if u.office }}{{ ' / ' if u.office and u.department }}{{ u.department.name if u.department }}</td></tr>{% endif %}
+    </table></div>
+    {% if rep.categories %}<h3 style="margin-top:14px">نوع استفاده (۳۰ روز اخیر)</h3><div class="chart" style="height:300px"><canvas id="cats"></canvas></div>{% endif %}
+  </div>
+</div>
+
+<div class="card" data-tour="sessions"><h3>اتصال‌های اخیر</h3><div class="tbl" style="max-height:420px;overflow:auto"><table>
+<tr><th>سرویس</th><th>ورود</th><th>خروج</th><th>مدت</th><th>دستگاه</th><th>IP</th><th>دانلود</th><th>آپلود</th></tr>
+{% for s in rep.sessions %}<tr><td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td>{{ s.start_time|jdt }}</td>
+<td>{{ s.stop_time|jdt if s.stop_time else 'آنلاین' }}</td><td>{{ s.session_time|duration }}</td><td>{{ s.device_type|devtype }} <span class="hint">{{ s.device_os }}</span></td>
+<td class="ltr">{{ s.framed_ip }}</td><td class="ltr">{{ s.bytes_out|bytes }}</td><td class="ltr">{{ s.bytes_in|bytes }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">اتصالی ثبت نشده</td></tr>{% endfor %}</table></div></div>
+
+<div class="card" id="password" data-tour="password"><h3>تغییر رمز عبور</h3>
+{% if u.source == 'ldap' %}<p class="hint">این رمز، رمز حساب دامنه (ویندوز) شماست و همان‌جا هم عوض می‌شود.</p>{% else %}<p class="hint">رمز جدید برای اتصال به هات‌اسپات و VPN استفاده می‌شود.</p>{% endif %}
+<form method="post" action="/my/password" style="max-width:420px">
+<div class="fg"><label>رمز فعلی</label><input name="current" type="password" class="ltr" autocomplete="current-password"></div>
+<div class="fg"><label>رمز جدید (حداقل ۶ کاراکتر)</label><input name="new" type="password" class="ltr" autocomplete="new-password"></div>
+<div class="fg"><label>تکرار رمز جدید</label><input name="again" type="password" class="ltr" autocomplete="new-password"></div>
+<button class="btn p">تغییر رمز</button></form></div>
+</div>
+<script>
+Chart.defaults.font.family = 'Vazirmatn, Tahoma, sans-serif';
+Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--muted');
+const PALETTE = ['#2563eb','#16a34a','#ea580c','#9333ea','#0891b2','#dc2626','#ca8a04','#db2777','#4f46e5','#65a30d','#0d9488','#7c3aed'];
+function fmtBytes(n){const u=['B','KB','MB','GB','TB'];let i=0;n=+n||0;while(n>=1024&&i<4){n/=1024;i++}return (i?n.toFixed(2):n)+' '+u[i]}
+function g2j(s){const [gy,gm,gd]=s.split('-').map(Number);try{return new Intl.DateTimeFormat('fa-IR-u-ca-persian',{month:'2-digit',day:'2-digit'}).format(new Date(gy,gm-1,gd))}catch(e){return s}}
+const D = {{ rep.split.daily|tojson }}, C = {{ rep.categories|tojson }};
+const tip = {callbacks:{label:c=>(c.dataset.label||c.label)+': '+fmtBytes(c.raw)}};
+new Chart(daily,{type:'bar',data:{labels:D.map(d=>g2j(d.day)),datasets:[{label:'اینترنت',data:D.map(d=>d.internet),backgroundColor:PALETTE[0]},{label:'تانل',data:D.map(d=>d.tunnel),backgroundColor:PALETTE[4]},{label:'داخل شبکه',data:D.map(d=>d.internal),backgroundColor:PALETTE[2]}]},
+ options:{maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:v=>fmtBytes(v)}}},plugins:{tooltip:tip}}});
+if (C.length) new Chart(cats,{type:'doughnut',data:{labels:C.map(c=>c.name),datasets:[{data:C.map(c=>c.down+c.up),backgroundColor:PALETTE}]},
+ options:{maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:tip}}});
+</script>
+<script src="/static/tour.js"></script>
+<script type="application/json" id="tour-steps">{{ my_tour|tojson }}</script>
+<script>Tour.init({steps: JSON.parse(document.getElementById('tour-steps').textContent), auto: {{ 'true' if my_tour_auto else 'false' }}, done: '/my/tour/done'});</script>
+</body></html>

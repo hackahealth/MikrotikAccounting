@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>روترهای میکروتیک</h2></div>
+<div class="card tbl"><table>
+<tr><th>نام</th><th>IP روتر</th><th>NAS-Identifier</th><th>API</th><th>تفکیک داخل شبکه / اینترنت</th><th>آخرین بسته RADIUS</th><th>آنلاین (RADIUS / API)</th><th>Traffic-Flow منطبق</th><th>وضعیت API</th><th title="تخمین حجمی که خواندن API و Traffic-Flow این روتر روی لینک دفتر تا سرور برنامه منتقل می‌کند">بار مانیتورینگ روی لینک</th><th></th></tr>
+{% for n in items %}
+<tr><td>{{ n.name }}</td><td class="ltr">{{ n.ip }}</td><td class="ltr">{{ n.identifier or '-' }}</td>
+<td class="ltr">{{ (n.api_user ~ '@' ~ (n.api_host or n.ip) ~ ':' ~ n.api_port) if n.api_user else '-' }}</td>
+<td>{% if n.wan_interfaces or n.lan_ranges or n.tunnel_interfaces or n.tunnel_ranges %}{{ describe(n) }}{% else %}<a class="badge warn" href="/nas/{{ n.id }}/edit#net">تعیین نشده</a>{% endif %}</td>
+<td>{{ n.last_seen|jdt }}</td><td>{% set a = active.get(n.name, [0, 0]) %}{{ a[0] }} / {{ a[1] }}</td>
+<td>{% set f = flow_seen.get(n.id) %}{% if f %}{{ f.matched }} <span class="hint">{{ f.last|jdt }}</span>{% else %}-{% endif %}{% if n.flow_port %} <span class="badge">پورت {{ n.flow_port }}</span>{% endif %}</td>
+<td>{{ status.get(n.name, '-') }}</td>
+<td class="ltr" style="white-space:nowrap">{% set ab = api_day.get(n.id) %}{% set fb = flow_day.get(n.id) %}{% if ab or fb %}{{ ((ab or 0) + (fb or 0))|bytes }}/day<div class="hint">API {{ (ab or 0)|bytes }} · Flow {{ (fb or 0)|bytes }}</div>{% else %}-{% endif %}</td>
+<td><a class="btn s" href="/traffic?nas={{ n.id }}">گراف</a> <a class="btn s" href="/nas/{{ n.id }}/edit">ویرایش</a>
+<form class="inline" method="post" action="/nas/{{ n.id }}/test"><button class="btn s">تست API</button></form>
+<form class="inline" method="post" action="/nas/{{ n.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="11" class="muted">هنوز روتری ثبت نشده</td></tr>{% endfor %}
+</table></div>
+
+<div class="card tbl" id="diag"><h3>عیب‌یابی: چه چیزی از روترها می‌رسد</h3>
+<p class="hint">از آخرین راه‌اندازی برنامه. «آنلاین API» یعنی کاربرانی که Accounting آن‌ها نمی‌رسد (اکانت محلی هات‌اسپات/PPP روتر یا Accounting خاموش) و هر دقیقه از لیست active روتر خوانده می‌شوند؛ مصرف و سرعتشان هم از همان‌جا ثبت می‌شود.</p>
+<p class="hint">روترهای دفاتر دیگر که از پشت NAT می‌رسند همه با IP مبدأ یکسان دیده می‌شوند؛ برنامه آن‌ها را با NAS-Identifier (همان identity روتر)، NAS-IP-Address و Secret هر روتر از هم جدا می‌کند. برای هر دفتر یک روتر جدا با IP خودش (نه IP روتر دفتر مرکزی) و Secret جدا تعریف کنید.</p>
+<table><tr><th>IP مبدأ</th><th>NAS-Identifier</th><th>NAS-IP-Address</th><th>روتر تشخیص داده‌شده</th><th>ورود</th><th>Accounting</th><th>رد شده</th><th>راهنما</th></tr>
+{% for d in radius_diag %}
+<tr><td class="ltr">{{ d.src }}</td><td class="ltr">{{ d.ident or '-' }}</td><td class="ltr">{{ d.nas_ip or '-' }}</td>
+<td>{{ d.name or '-' }}</td><td>{{ d.auth }}</td><td>{{ d.acct }}{% if d.last_acct %}<div class="hint">{{ d.last_acct|jdt }}</div>{% endif %}</td>
+<td>{% if d.dropped %}<span class="badge err" title="روتر ناشناس">{{ d.dropped }} ناشناس</span>{% endif %}{% if d.bad_secret %} <span class="badge err">{{ d.bad_secret }} Secret اشتباه</span>{% endif %}{% if not d.dropped and not d.bad_secret %}0{% endif %}<div class="hint">{{ d.last|jdt }}</div></td>
+<td class="wrap hint">{% set add = '/nas?ident=' ~ (d.ident|urlencode) ~ '&nas_ip=' ~ (d.nas_ip|urlencode) ~ '#nasform' %}
+{% if d.dropped %}این روتر تعریف نشده است. <a class="btn s" style="white-space:nowrap" href="{{ add }}">افزودن این روتر</a>
+{% elif d.bad_secret %}Secret هیچ روتری با این بسته نمی‌خورد{% if d.name %} (نزدیک‌ترین: {{ d.name }}){% endif %}. اگر روتر یک دفتر دیگر است که از پشت NAT می‌رسد، آن را جدا تعریف کنید: <a class="btn s" style="white-space:nowrap" href="{{ add }}">افزودن این روتر</a>؛ وگرنه Secret را در روتر و اینجا یکی کنید.
+{% elif d.auth and not d.acct %}درخواست ورود می‌رسد ولی Accounting نه: <span class="ltr">/radius set [find] service=hotspot,ppp</span> و <span class="ltr">/ip hotspot profile set [find] radius-accounting=yes radius-interim-update=5m</span> و <span class="ltr">/ppp aaa set accounting=yes interim-update=5m</span>
+{% else %}درست است{% endif %}</td></tr>
+{% else %}<tr><td colspan="8" class="muted wrap">هنوز هیچ بسته RADIUS نرسیده. اگر همه کاربران محلی روتر هستند طبیعی است (از API خوانده می‌شوند)؛ وگرنه فایروال ویندوز (پورت UDP 1812/1813) و تنظیم <span class="ltr">/radius</span> روتر را بررسی کنید.</td></tr>{% endfor %}
+</table>
+<table style="margin-top:12px"><tr><th>فرستنده Traffic-Flow</th><th>روتر</th><th>بسته</th><th>Flow</th><th>منطبق با کاربر آنلاین</th><th>نسخه</th><th>آخرین بسته</th><th>راهنما</th></tr>
+{% for e in flow_diag %}
+<tr><td class="ltr">{{ e.sender }}</td><td>{{ e.router or '-' }}{% if e.split %}<div class="hint">از پشت NAT، بر اساس کاربر آنلاین: {% for name, c in e.split %}{{ name }} ({{ c }}){{ '، ' if not loop.last }}{% endfor %}</div>{% endif %}</td>
+<td>{{ e.packets }}</td><td>{{ e.flows }}</td><td>{{ e.matched }}</td>
+<td>{{ {5: 'v5', 9: 'v9', 10: 'IPFIX'}.get(e.version, e.version) }}</td><td>{{ e.last|jdt }}</td>
+<td class="wrap hint">{% if e.flows and not e.matched %}Flow می‌رسد ولی IP آن‌ها به IP هیچ کاربر آنلاینی نمی‌خورد؛ Traffic-Flow را روی اینترفیس LAN/هات‌اسپات (یا <span class="ltr">interfaces=all</span>) فعال کنید تا IP قبل از NAT دیده شود.
+{% elif e.packets and not e.flows %}بسته می‌رسد ولی Flow خوانده نشد (در v9/IPFIX تا رسیدن Template صبر کنید).{% else %}درست است{% endif %}</td></tr>
+{% else %}<tr><td colspan="8" class="muted wrap">هیچ بسته Traffic-Flow نرسیده؛ تفکیک سایت‌ها و داخل شبکه/اینترنت بدون آن کار نمی‌کند (حجم کل از Accounting یا API ثبت می‌شود). <span class="ltr">/ip traffic-flow set enabled=yes interfaces=all</span> و <span class="ltr">/ip traffic-flow target add dst-address=IP-این-سرور port={{ flow_port }} version=9</span> و پورت UDP {{ flow_port }} در فایروال ویندوز.</td></tr>{% endfor %}
+</table>
+<p class="hint">Traffic-Flow روترهای پشت NAT هم با IP مبدأ یکسان می‌رسد؛ برنامه هر Flow را به روتری نسبت می‌دهد که کاربرِ صاحب آن IP رویش آنلاین است. اگر دفترها رنج IP یکسان دارند (مثلاً همه <span class="ltr">192.168.88.0/24</span>)، برای روتر آن دفتر «پورت Traffic-Flow اختصاصی» بگذارید و در روتر <span class="ltr">/ip traffic-flow target set [find] port=همان-پورت</span>.</p></div>
+<div class="card"><h3>{{ 'ویرایش ' ~ edit.name if edit else 'افزودن روتر' }}</h3>
+<form method="post" action="/nas/save" id="nasform"><input type="hidden" name="id" value="{{ edit.id if edit else '' }}">
+<div class="grid g3">
+  <div class="fg"><label>نام</label><input name="name" value="{{ edit.name if edit else new.ident }}"></div>
+  <div class="fg"><label>IP روتر (IP خود روتر، همان src-address در <span class="ltr">/radius</span>؛ 0.0.0.0 = هر IP)</label><input name="ip" class="ltr" value="{{ edit.ip if edit else new.nas_ip }}"></div>
+  <div class="fg"><label>RADIUS Secret {{ '(خالی = بدون تغییر)' if edit }}</label><input name="secret" class="ltr"></div>
+  <div class="fg"><label>NAS-Identifier (identity روتر؛ برای روتر پشت NAT)</label><input name="identifier" class="ltr" value="{{ edit.identifier if edit else new.ident }}" placeholder="خالی = از API خوانده می‌شود"></div>
+  <div class="fg"><label>پورت Traffic-Flow اختصاصی (خالی = {{ flow_port }})</label><input name="flow_port" class="ltr" value="{{ edit.flow_port if edit and edit.flow_port else '' }}" placeholder="مثلاً 2056"></div>
+  <div class="fg"><label>آدرس API (خالی = همان IP)</label><input name="api_host" class="ltr" value="{{ edit.api_host if edit else '' }}"></div>
+  <div class="fg"><label>پورت API</label><input name="api_port" class="ltr" value="{{ edit.api_port if edit else 8728 }}"></div>
+  <div class="fg"><label><input type="checkbox" name="api_ssl" value="1" {{ 'checked' if edit and edit.api_ssl }}> API-SSL (پورت 8729)</label></div>
+  <div class="fg"><label>کاربر API / FTP</label><input name="api_user" class="ltr" value="{{ edit.api_user if edit else '' }}"></div>
+  <div class="fg"><label>رمز API {{ '(خالی = بدون تغییر)' if edit }}</label><input name="api_password" type="password" class="ltr"></div>
+  <div class="fg"><label>پورت CoA / Disconnect</label><input name="coa_port" class="ltr" value="{{ edit.coa_port if edit else 3799 }}"></div>
+  <div class="fg"><label>دفتر</label><select name="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if edit and edit.office_id == o.id }}>{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>انتقال فایل (فولدر hotspot)</label><select name="file_proto"><option value="ftp">FTP</option><option value="sftp" {{ 'selected' if edit and edit.file_proto == 'sftp' }}>SFTP (SSH)</option></select></div>
+  <div class="fg"><label>پورت FTP/SSH (خالی = 21 یا 22)</label><input name="file_port" class="ltr" value="{{ edit.file_port if edit and edit.file_port else '' }}"></div>
+  <div class="fg"><label>مسیر فولدر hotspot (خالی = تشخیص خودکار)</label><input name="hotspot_dir" class="ltr" value="{{ edit.hotspot_dir if edit else '' }}" placeholder="hotspot یا flash/hotspot"></div>
+</div>
+
+<h3 id="net" style="margin-top:8px">تفکیک مصرف داخل شبکه و اینترنت در این روتر</h3>
+<p class="hint">یکی از دو روش (یا هر دو) را پر کنید: ۱) اینترفیس‌هایی که به اینترنت وصل‌اند (WAN، مثل <span class="ltr">ether1</span> یا <span class="ltr">pppoe-out1</span>)؛ ترافیکی که از این اینترفیس‌ها رد شود «اینترنت» و بقیه «داخل شبکه» است. ۲) رنج IP شبکه‌های داخلی پشت این روتر (سرورها و شبکه محلی؛ شبکه دفاتر دیگر را در بخش «تانل» پایین‌تر بنویسید). اگر هیچ‌کدام پر نشود، رنج‌های داخلی عمومی پایین صفحه ملاک است.</p>
+<div class="grid g2">
+  <div class="fg"><label>اینترفیس‌های اینترنت (WAN)</label>
+    {% if interfaces %}<div class="radios" style="margin:6px 0 10px">
+    {% for i in interfaces %}<label class="ltr"><input type="checkbox" name="wan" value="{{ i.name }}" {{ 'checked' if i.name in wan or (not wan and detected and i.name in detected.wan) }}> {{ i.name }}{% if i.type %} <span class="hint">({{ i.type }})</span>{% endif %} <span class="hint">#{{ i.index }}</span></label>{% endfor %}
+    </div>{% elif edit %}<p class="hint">فهرست اینترفیس‌ها هنوز از روتر خوانده نشده؛ دکمه «تشخیص خودکار» را بزنید یا نام‌ها را دستی بنویسید.</p>{% endif %}
+    <input name="wan_extra" class="ltr" value="{{ wan_extra if edit else '' }}" placeholder="ether1, pppoe-out1  یا شماره ifIndex مثل 1">
+    <div class="hint">نام اینترفیس یا شماره (ifIndex در Traffic-Flow)، با ویرگول جدا شود.</div></div>
+  <div class="fg"><label>رنج IP داخلی پشت این روتر</label>
+    <textarea name="lan_ranges" rows="5" class="ltr" placeholder="192.168.10.0/24&#10;10.20.0.0/16&#10;172.16.5.10-172.16.5.50">{{ edit.lan_ranges if edit and edit.lan_ranges else (detected.lan|join('\n') if detected else '') }}</textarea>
+    <div class="hint">هر خط یک رنج: CIDR، یک IP یا بازه <span class="ltr">a-b</span>.{% if detected and detected.lan and edit and not edit.lan_ranges %} <b>پیشنهاد روتر پر شد؛ بررسی و ذخیره کنید.</b>{% elif detected and detected.lan %}<br>رنج‌های پیدا شده در روتر: <span class="ltr">{{ detected.lan|join(', ') }}</span>{% endif %}</div></div>
+  <div class="fg"><label>اینترفیس‌های شبکه داخلی (برای گراف ترافیک)</label>
+    {% if interfaces %}<div class="radios" style="margin:6px 0 10px">
+    {% for i in interfaces %}<label class="ltr"><input type="checkbox" name="lan_if" value="{{ i.name }}" {{ 'checked' if i.name in lan_ifs or (not lan_ifs and detected and i.name in detected.lan_ifaces) }}> {{ i.name }}{% if i.type %} <span class="hint">({{ i.type }})</span>{% endif %}</label>{% endfor %}
+    </div>{% endif %}
+    <input name="lan_if_extra" class="ltr" value="{{ lan_ifs|reject('in', interfaces|map(attribute='name')|list)|join(' ') if edit else '' }}" placeholder="bridge-lan, vlan10">
+    <div class="hint">گراف «شبکه داخلی» در صفحه ترافیک روترها جمع این اینترفیس‌هاست؛ گراف «اینترنت» جمع اینترفیس‌های WAN بالا.</div></div>
+</div>
+<h4 id="tunnel">تانل به دفاتر دیگر (روی بستر اینترنت)</h4>
+<p class="hint">ترافیک کاربران به شبکه دفاتر دیگر از راه تانل جدا با عنوان «تانل» ثبت می‌شود (نه اینترنت، نه داخل شبکه) و مثل داخل شبکه از حجم بسته کاربر کم نمی‌شود. اگر اینترفیسی تیک نخورد، همه اینترفیس‌های تانل روتر (EoIP، GRE، IPIP، L2TP، SSTP، PPTP، OVPN، WireGuard) خودکار تانل حساب می‌شوند. برای IPsec بدون اینترفیس، رنج شبکه دفاتر دیگر را بنویسید.</p>
+<div class="grid g2">
+  <div class="fg"><label>اینترفیس‌های تانل</label>
+    {% if interfaces %}<div class="radios" style="margin:6px 0 10px">
+    {% for i in interfaces %}{% set auto = i.type in tunnel_types %}<label class="ltr"><input type="checkbox" name="tun_if" value="{{ i.name }}" {{ 'checked' if i.name in tun_ifs }}> {{ i.name }}{% if i.type %} <span class="hint">({{ i.type }}{{ '، خودکار' if auto and not tun_ifs }})</span>{% endif %}</label>{% endfor %}
+    </div>{% endif %}
+    <input name="tun_if_extra" class="ltr" value="{{ tun_ifs|reject('in', interfaces|map(attribute='name')|list)|join(' ') if edit else '' }}" placeholder="eoip-hq, l2tp-out1"></div>
+  <div class="fg"><label>رنج شبکه دفاتر دیگر (از راه تانل / IPsec)</label>
+    <textarea name="tunnel_ranges" rows="4" class="ltr" placeholder="192.168.1.0/24   # دفتر مرکزی&#10;10.10.0.0/16">{{ edit.tunnel_ranges if edit and edit.tunnel_ranges else '' }}</textarea>
+    <div class="hint">مقصدهای این رنج‌ها همیشه «تانل» حساب می‌شوند.</div></div>
+</div>
+<div class="grid g2">
+  <div class="fg"><label>پایش: ping از این روتر به (حداکثر ۵ آدرس، با فاصله یا ویرگول)</label>
+    <input name="monitor_targets" class="ltr" value="{{ edit.monitor_targets if edit and edit.monitor_targets else '' }}" placeholder="192.168.1.10 192.168.1.1">
+    <div class="hint">مثلاً سرور دفتر مرکزی از راه تانل. قطع یا کند شدن (بیش از حد تنظیم‌شده در صفحهٔ پایش) اعلان می‌شود.</div></div>
+</div>
+<button class="btn p">ذخیره</button>
+{% if edit %}<button class="btn" formaction="/nas/{{ edit.id }}/detect-net" formmethod="post" {{ 'disabled title="ابتدا API روتر را تنظیم کنید"' if not edit.api_user }}>تشخیص خودکار اینترفیس و رنج داخلی از روتر</button>{% endif %}
+</form>
+<p class="hint">API برای نمایش سرعت لحظه‌ای، خواندن DNS cache (تشخیص سایت‌ها)، DHCP lease (تشخیص دستگاه)، قطع کاربر و خواندن اینترفیس‌ها استفاده می‌شود. اسکریپت آماده تنظیمات در پوشه <span class="ltr">mikrotik/setup.rsc</span> است.</p>
+</div>
+
+<div class="card"><h3>رنج‌های داخل شبکه (برای همه روترها)</h3>
+<form method="post" action="/nas/scope">
+<div class="grid g2">
+  <div class="fg"><label>رنج‌های داخلی عمومی</label><textarea name="internal_ranges" rows="5" class="ltr">{{ internal_ranges }}</textarea>
+    <div class="hint">مقصدهای داخل این رنج‌ها «داخل شبکه» حساب می‌شوند (وقتی برای روتر اینترفیس WAN تعیین نشده باشد).</div></div>
+  <div class="fg"><label>استثنا: همیشه اینترنت</label><textarea name="internet_ranges" rows="5" class="ltr" placeholder="192.168.1.250   # پروکسی / فایروال اینترنت">{{ internet_ranges }}</textarea>
+    <div class="hint">مثلاً IP پروکسی یا فایروالی که اینترنت از آن رد می‌شود؛ ترافیک به این مقصدها همیشه «اینترنت» است.</div></div>
+</div>
+<label><input type="checkbox" name="quota_internet_only" value="1" {{ 'checked' if quota_internet_only }}> مصرف «داخل شبکه» و «تانل» از حجم بسته کاربران کم نشود (فقط اینترنت حساب شود)</label>
+<div class="hint">در این حالت حجم به روتر (Mikrotik-Total-Limit) فرستاده نمی‌شود، چون روتر همه ترافیک را می‌شمارد؛ برنامه خودش کاربری را که حجم اینترنتش تمام شود حداکثر حدود یک دقیقه بعد قطع می‌کند. دسترسی همچنان فقط بعد از ورود به هات‌اسپات است (بدون Walled Garden).</div>
+<button class="btn p" style="margin-top:8px">ذخیره</button></form>
+<p class="hint">تفکیک با Traffic-Flow انجام می‌شود (پورت 2055). حجم کل هر کاربر از Accounting روتر خوانده می‌شود و سهم «داخل شبکه» از آن جدا می‌شود.</p>
+</div>
+{% endblock %}

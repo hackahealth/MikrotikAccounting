@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>تماس‌های زنده <span class="hint" id="live-at"></span></h2><a class="btn" href="/calls">گزارش تماس‌ها</a></div>
+{% if not configured %}<div class="card"><p>برای دیدن تماس‌های جاری، در صفحهٔ سرورهای ایزابل کاربر AMI را وارد کنید.{% if 'pbx_manage' in perms %} <a class="btn s" href="/pbx">سرورهای ایزابل</a>{% endif %}</p></div>{% endif %}
+<div class="grid g4">
+  <div class="card stat"><div class="l">در حال مکالمه</div><div class="v" id="n-talk">{{ rows|selectattr('state', 'equalto', 'talk')|list|length }}</div></div>
+  <div class="card stat"><div class="l">در حال زنگ</div><div class="v" id="n-ring">{{ rows|selectattr('state', 'equalto', 'ring')|list|length }}</div></div>
+  <div class="card stat"><div class="l">در صف انتظار</div><div class="v" id="n-wait">{{ rows|selectattr('state', 'equalto', 'wait')|list|length }}</div></div>
+  <div class="card stat"><div class="l">ورودی / خروجی</div><div class="v" id="n-dir">{{ rows|selectattr('direction', 'equalto', 'in')|list|length }} / {{ rows|selectattr('direction', 'equalto', 'out')|list|length }}</div></div>
+</div>
+<div id="live-err">{% for e in errors %}<div class="flash err">{{ e }}</div>{% endfor %}</div>
+<div class="card tbl"><table>
+<thead><tr><th>وضعیت</th><th>جهت</th><th>داخلی</th><th>کارمند</th><th>طرف مقابل</th><th>صف</th><th>مدت</th><th>سرور</th></tr></thead>
+<tbody id="live-rows">
+{% for r in rows %}<tr><td><span class="badge {{ 'ok' if r.state == 'talk' else 'warn' }}">{{ {'talk': 'مکالمه', 'ring': 'زنگ', 'wait': 'انتظار در صف'}[r.state] }}</span></td>
+<td>{{ dir_fa.get(r.direction, r.direction) }}</td><td class="ltr">{{ r.extension }}</td><td>{{ r.user }}</td><td class="ltr">{{ r.other }}</td><td class="ltr">{{ r.queue }}</td><td class="ltr">{{ r.seconds|mmss }}</td><td>{{ r.server }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">الان تماسی در جریان نیست</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="hint">هر ۵ ثانیه از AMI ایزابل خوانده می‌شود.</p>
+{% endblock %}
+{% block scripts %}<script>
+const ST = {talk: ['ok', 'مکالمه'], ring: ['warn', 'زنگ'], wait: ['warn', 'انتظار در صف']};
+const DIR = {{ dir_fa|tojson }};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const mmss = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+async function tick() {
+  try {
+    const d = await (await fetch('/api/calls/live')).json();
+    const by = k => d.rows.filter(r => r.state === k).length;
+    document.getElementById('n-talk').textContent = by('talk');
+    document.getElementById('n-ring').textContent = by('ring');
+    document.getElementById('n-wait').textContent = by('wait');
+    document.getElementById('n-dir').textContent = d.rows.filter(r => r.direction === 'in').length + ' / ' + d.rows.filter(r => r.direction === 'out').length;
+    document.getElementById('live-err').innerHTML = d.errors.map(e => '<div class="flash err">' + esc(e) + '</div>').join('');
+    document.getElementById('live-rows').innerHTML = d.rows.length ? d.rows.map(r => '<tr><td><span class="badge ' + ST[r.state][0] + '">' + ST[r.state][1] + '</span></td><td>' + esc(DIR[r.direction] || r.direction) + '</td><td class="ltr">' + esc(r.extension) + '</td><td>' + esc(r.user) + '</td><td class="ltr">' + esc(r.other) + '</td><td class="ltr">' + esc(r.queue) + '</td><td class="ltr">' + mmss(r.seconds) + '</td><td>' + esc(r.server) + '</td></tr>').join('') : '<tr><td colspan="8" class="muted">الان تماسی در جریان نیست</td></tr>';
+    document.getElementById('live-at').textContent = new Date().toLocaleTimeString('fa-IR');
+  } catch (e) {}
+}
+setInterval(tick, 5000);
+</script>{% endblock %}

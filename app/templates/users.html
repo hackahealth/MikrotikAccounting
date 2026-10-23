@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>کاربران</h2>
+  {% if 'users_edit' in perms %}<div><a class="btn p" href="/users/new">+ کاربر جدید</a> <a class="btn" href="#bulk" onclick="document.getElementById('bulk').style.display='block'">ایجاد گروهی</a>{% if 'ad_sync' in perms or 'ad_manage' in perms %} <a class="btn" href="/ad">ورود از Active Directory</a>{% endif %}</div>{% endif %}</div>
+{% if 'users_edit' in perms %}<div class="card" id="bulk" style="display:none"><h3>ایجاد گروهی کاربران محلی</h3>
+  <form method="post" action="/users/bulk">
+    <div class="fg"><label>هر خط: نام‌کاربری,رمز,نام کامل</label><textarea name="lines" rows="5" class="ltr" placeholder="ali,Pass123,علی رضایی"></textarea></div>
+    <div class="grid g3">
+    <div class="fg"><label>گروه</label><select name="group_id">{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select></div>
+    <div class="fg"><label>دفتر</label><select name="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+    <div class="fg"><label>واحد</label><select name="department_id"><option value="">-</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>
+    </div>
+    <button class="btn p">ایجاد</button></form></div>{% endif %}
+<div class="card">
+<form class="filters" method="get">
+  <div><label>جستجو</label><input name="q" value="{{ q }}" placeholder="نام کاربری، نام، ایمیل"></div>
+  {% if offices %}<div><label>دفتر</label><select name="office"><option value="">همه</option>{% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if office == o.id|string }}>{{ o.name }}</option>{% endfor %}</select></div>{% endif %}
+  {% if departments %}<div><label>واحد</label><select name="department"><option value="">همه</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if department == d.id|string }}>{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>{% endif %}
+  <div><label>گروه</label><select name="group"><option value="">همه</option>{% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if group == g.id|string }}>{{ g.name }}</option>{% endfor %}</select></div>
+  <div><label>منبع</label><select name="source"><option value="">همه</option><option value="local" {{ 'selected' if source=='local' }}>محلی</option><option value="ldap" {{ 'selected' if source=='ldap' }}>Active Directory</option><option value="router" {{ 'selected' if source=='router' }}>اکانت محلی روتر</option></select></div>
+  <div><label>وضعیت</label><select name="status"><option value="">همه</option><option value="on" {{ 'selected' if status=='on' }}>فعال</option><option value="off" {{ 'selected' if status=='off' }}>غیرفعال</option></select></div>
+  <div><button class="btn">اعمال</button></div>
+</form></div>
+{% if 'users_edit' in perms %}
+<div class="card" id="bedit" style="display:none"><h3>ویرایش گروهی <span id="selcount">0</span> کاربر انتخاب‌شده</h3>
+<form method="post" action="/users/bulk-edit" id="bulkedit">
+<input type="hidden" name="back" value="/users?{{ qs }}">
+<p class="hint">فقط فیلدهایی که تیک خورده‌اند تغییر می‌کنند؛ فیلد تیک‌خورده با مقدار خالی یعنی پاک کردن آن مقدار.</p>
+<div class="grid g3">
+  <div class="fg"><label><input type="checkbox" name="set" value="group_id"> گروه</label>
+    <select name="v_group_id" data-set="group_id"><option value="">بدون گروه</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}{{ ' (AD)' if g.ldap_group_dn }}</option>{% endfor %}</select></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="office_id"> دفتر</label>
+    <select name="v_office_id" data-set="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="department_id"> واحد</label>
+    <select name="v_department_id" data-set="department_id"><option value="">-</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>
+  {% for k, label in bulk_text.items() %}<div class="fg"><label><input type="checkbox" name="set" value="{{ k }}"> {{ label }}</label><input name="v_{{ k }}" data-set="{{ k }}" class="{{ 'ltr' if k in ('phone', 'mobile') }}"></div>{% endfor %}
+</div>
+<details><summary class="hint" style="cursor:pointer">محدودیت‌های اینترنت (فقط در این برنامه)</summary>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label><input type="checkbox" name="set" value="rate_limit"> سرعت (خالی = از گروه)</label><input name="v_rate_limit" data-set="rate_limit" class="ltr" placeholder="2M/8M"></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="quota_gb"> سهمیه (GB، خالی = از گروه)</label><input name="v_quota_gb" data-set="quota_gb" class="ltr"></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="allowed_hours"> ساعات مجاز (خالی = از گروه)</label><input name="v_allowed_hours" data-set="allowed_hours" placeholder="sat-wed 07:00-17:00"></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="simultaneous_use"> اتصال همزمان (خالی = از گروه)</label><input name="v_simultaneous_use" data-set="simultaneous_use" class="ltr"></div>
+  <div class="fg"><label><input type="checkbox" name="set" value="expire_at"> تاریخ انقضا (خالی = بدون انقضا)</label><input name="v_expire_at" data-set="expire_at" class="ltr" placeholder="1405/12/29"></div>
+</div></details>
+{% if ad_enabled %}<div class="fg" style="margin-top:8px"><label><input type="checkbox" name="ad_write" value="1" checked> برای کاربران AD، تغییرات در Active Directory هم ثبت شود</label>
+  <label><input type="checkbox" name="ad_exclusive" value="1" checked> با تغییر گروه، کاربر از گروه‌های AD نگاشت‌شده دیگر خارج شود (وگرنه همگام‌سازی بعدی ممکن است گروه قبلی را برگرداند)</label>
+  <div class="hint">دفتر ← physicalDeliveryOfficeName، واحد ← department، محل ← l، سمت ← title، شرکت ← company، تلفن ← telephoneNumber، موبایل ← mobile، گروه ← عضویت در گروه AD نگاشت‌شده. کاربر سرویس AD باید اجازه نوشتن داشته باشد (README).</div></div>{% endif %}
+<button class="btn p">اعمال روی کاربران انتخاب‌شده</button> <button type="button" class="btn" onclick="selAll(false)">لغو انتخاب</button>
+</form></div>
+{% endif %}
+<div class="card tbl"><table>
+<tr>{% if 'users_edit' in perms %}<th><input type="checkbox" title="انتخاب همه" onchange="selAll(this.checked)"></th>{% endif %}<th>کاربر</th><th>نام</th><th>دفتر / واحد</th><th>منبع</th><th>گروه</th><th>سرعت</th><th>مصرف دوره / سهمیه</th><th>ساعات مجاز</th><th>انقضا</th><th>آخرین ورود</th><th>وضعیت</th><th></th></tr>
+{% for r in rows %}{% set u = r.u %}
+<tr>
+  {% if 'users_edit' in perms %}<td><input type="checkbox" class="sel" name="ids" value="{{ u.id }}" form="bulkedit"></td>{% endif %}
+  <td>{% if 'reports_view' in perms %}<a href="/reports?preset=month&user_id={{ u.id }}">{{ u.username }}</a>{% else %}{{ u.username }}{% endif %} {% if r.online %}<span class="badge ok">آنلاین</span>{% endif %}</td>
+  <td>{{ u.full_name }}{% if u.personnel_code %} <span class="hint ltr">{{ u.personnel_code }}</span>{% endif %}{% if u.mobile or u.title %}<div class="hint">{{ u.title }}{{ ' · ' if u.title and u.mobile }}<span class="ltr">{{ u.mobile }}</span></div>{% endif %}</td>
+  <td>{{ u.office.name if u.office else '' }}{{ ' / ' if u.office and u.department }}{{ u.department.name if u.department else '' }}{{ '-' if not u.office and not u.department }}</td>
+  <td>{{ {'ldap': 'AD', 'router': 'روتر'}.get(u.source, 'محلی') }}</td>
+  <td>{{ u.group.name if u.group else '-' }}</td>
+  <td class="ltr">{{ r.eff.rate_limit or 'نامحدود' }}</td>
+  <td>{% if r.quota %}<div class="bar"><i class="{{ 'hi' if r.pct >= 90 }}" style="width:{{ r.pct }}%"></i></div>
+      <span class="ltr">{{ r.used|bytes }} / {{ r.quota|bytes }}</span>{% else %}<span class="ltr">{{ r.used|bytes }}</span> / نامحدود{% endif %}</td>
+  <td class="hours">{% if r.eff.allowed_hours %}{% for part in r.eff.allowed_hours.split(';') %}{{ part.strip() }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}همیشه{% endif %}</td>
+  <td>{{ u.expire_at|jdate if u.expire_at else '-' }}</td>
+  <td>{{ u.last_login|jdt }}</td>
+  <td>{% if u.enabled %}<span class="badge ok">فعال</span>{% else %}<span class="badge err">غیرفعال</span>{% endif %}</td>
+  <td>{% if 'users_edit' in perms %}
+    <a class="btn s" href="/users/{{ u.id }}/edit">ویرایش</a>
+    <form class="inline" method="post" action="/users/{{ u.id }}/toggle"><button class="btn s">{{ 'غیرفعال' if u.enabled else 'فعال' }}</button></form>
+    <form class="inline" method="post" action="/users/{{ u.id }}/reset" onsubmit="return confirm('مصرف این کاربر صفر شود؟')"><button class="btn s">صفر کردن مصرف</button></form>
+    <form class="inline" method="post" action="/users/{{ u.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form>
+  {% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="13" class="muted">کاربری یافت نشد</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
+{% block scripts %}
+<script>
+function selCount(){ const n = document.querySelectorAll('.sel:checked').length, c = document.getElementById('bedit');
+  if (!c) return; document.getElementById('selcount').textContent = n; c.style.display = n ? 'block' : 'none'; }
+function selAll(on){ document.querySelectorAll('.sel').forEach(x => x.checked = on); document.querySelectorAll('th input[type=checkbox]').forEach(x => x.checked = on); selCount(); }
+document.querySelectorAll('.sel').forEach(x => x.addEventListener('change', selCount));
+document.querySelectorAll('[data-set]').forEach(el => ['input', 'change'].forEach(ev => el.addEventListener(ev, () => {
+  const cb = document.querySelector('input[name=set][value="' + el.dataset.set + '"]'); if (cb) cb.checked = true; })));
+</script>
+{% endblock %}

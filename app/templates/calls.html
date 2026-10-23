@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_macros.html" import org_filters %}
+{% block content %}
+{% set st = c.stats %}
+<div class="top"><h2>تماس‌ها <span class="hint">{{ start }} تا {{ end }}{{ ' · ' ~ caption if caption }}</span></h2>
+<div>{% if servers|selectattr('ami_user')|list %}<a class="btn" href="/calls/live">تماس‌های زنده</a> {% endif %}<a class="btn p" href="/calls/export.xlsx?{{ qs }}">دانلود Excel</a> <button class="btn" onclick="window.print()">چاپ / PDF</button></div></div>
+{% if not servers %}<div class="card"><p>هنوز سرور ایزابلی تعریف نشده است.{% if 'pbx_manage' in perms %} <a class="btn s" href="/pbx/new">افزودن سرور ایزابل</a>{% else %} از مدیر سیستم بخواهید سرور ایزابل را در برنامه تعریف کند.{% endif %}</p></div>{% endif %}
+<div class="card"><form class="filters" method="get">
+  <div><label>دوره</label><select name="preset" onchange="if(this.value)this.form.submit()"><option value="">دلخواه</option>
+    {% for key, v in [('today','امروز'),('yesterday','دیروز'),('week','این هفته'),('month','این ماه'),('lastmonth','ماه قبل'),('30d','۳۰ روز اخیر'),('90d','۹۰ روز اخیر')] %}
+    <option value="{{ key }}" {{ 'selected' if request.query_params.get('preset', 'today' if not request.query_params.get('from') else '') == key }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>از (شمسی)</label><input name="from" class="ltr" value="{{ start }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ end }}"></div>
+{{ org_filters(f, offices, departments, groups) }}
+  <div><label>کارمند</label><select name="user_id"><option value="">همه</option>{% for id, un, fn in users %}<option value="{{ id }}" {{ 'selected' if f.user_id == id }}>{{ fn or un }} ({{ un }})</option>{% endfor %}</select></div>
+  {% if servers|length > 1 %}<div><label>سرور</label><select name="pbx"><option value="">همه سرورها</option>{% for s in servers %}<option value="{{ s.id }}" {{ 'selected' if pbx_id == s.id }}>{{ s.name }}</option>{% endfor %}</select></div>{% endif %}
+  <div><button class="btn p" onclick="this.form.preset.value=''">نمایش</button></div>
+</form></div>
+
+<div class="grid g4">
+  <div class="card stat"><div class="l">تماس ورودی</div><div class="v">{{ st['in'].count }}</div>
+    <div class="hint">پاسخ‌داده {{ st['in'].answered }} · بی‌پاسخ <b>{{ st['in'].count - st['in'].answered }}</b>{% if st['in'].count %} ({{ ((st['in'].count - st['in'].answered) * 100 / st['in'].count)|round|int }}٪){% endif %}</div></div>
+  <div class="card stat"><div class="l">تماس خروجی</div><div class="v">{{ st.out.count }}</div>
+    <div class="hint">پاسخ‌داده {{ st.out.answered }} · داخلی (بین همکاران) {{ st.internal.count }}</div></div>
+  <div class="card stat"><div class="l">مجموع مکالمه</div><div class="v">{{ c.talk|duration }}</div>
+    <div class="hint">میانگین هر مکالمه <span class="ltr">{{ c.avg_talk|mmss }}</span> دقیقه</div></div>
+  <div class="card stat"><div class="l">بی‌پاسخ بدون تماس برگشت</div><div class="v">{{ c.missed_count }}</div>
+    <div class="hint">میانگین انتظار تا پاسخ <span class="ltr">{{ c.avg_ring }}</span> ثانیه</div></div>
+</div>
+
+<div class="grid g2">
+  <div class="card"><h3>{{ 'تماس‌ها در طول روز' if c.daily|length <= 1 else 'تماس‌های هر روز' }}</h3><div class="chart"><canvas id="c_daily"></canvas></div></div>
+  <div class="card"><h3>ساعات تماس <span class="hint">ورودی و خروجی، به تفکیک روز هفته</span></h3><div class="tbl"><table class="heat">
+    <tr><th></th>{% for h in range(7, 22) %}<th>{{ h }}</th>{% endfor %}<th>سایر</th></tr>
+    {% for row in c.heat %}<tr><th>{{ weekdays[loop.index0] }}</th>
+      {% for h in range(7, 22) %}{% set v = row[h] %}<td style="background:rgba(37,99,235,{{ (0.08 + 0.85 * v / c.heat_max)|round(2) if v and c.heat_max else 0 }});{{ 'color:#fff' if c.heat_max and v / c.heat_max > 0.55 }}">{{ v or '' }}</td>{% endfor %}
+      {% set other = (row[:7]|sum) + (row[22:]|sum) %}<td>{{ other or '' }}</td></tr>{% endfor %}
+  </table></div></div>
+</div>
+
+<div class="card tbl"><h3>تماس افراد</h3><table>
+<tr><th>کارمند</th><th>دفتر / واحد</th><th>داخلی</th><th>ورودی</th><th>پاسخ داده</th><th>بی‌پاسخ</th><th>خروجی</th><th>بین همکاران</th><th>مجموع مکالمه</th><th>میانگین</th></tr>
+{% for r in c.people %}<tr><td>{{ r.full_name or r.username }} <span class="hint ltr">{{ r.username }}</span></td><td>{{ r.office }}{{ ' / ' if r.office and r.department }}{{ r.department }}</td>
+<td class="ltr">{{ r.exts }}</td><td>{{ r['in'] }}</td><td>{{ r.in_answered }}</td><td>{% if r.missed %}<span class="badge warn">{{ r.missed }}</span>{% else %}0{% endif %}</td>
+<td>{{ r.out }}</td><td>{{ r.internal }}</td><td>{{ r.talk|duration }}</td><td class="ltr">{{ r.avg_talk|mmss }}</td></tr>
+{% else %}<tr><td colspan="10" class="muted">تماسی به نام کارکنان ثبت نشده{% if c.unassigned %}؛ داخلی‌ها هنوز به افراد تخصیص داده نشده‌اند (پایین صفحه){% endif %}</td></tr>{% endfor %}
+</table></div>
+
+{% if c.people and not f.user_id %}
+<div class="grid g2">{% for title, rows in [('دفتر', c.offices), ('واحد', c.departments)] %}
+  <div class="card tbl"><h3>به تفکیک {{ title }}</h3><table><tr><th>{{ title }}</th><th>نفرات</th><th>ورودی</th><th>بی‌پاسخ</th><th>خروجی</th><th>مکالمه</th></tr>
+  {% for e in rows %}<tr><td>{{ e.name }}</td><td>{{ e.people }}</td><td>{{ e['in'] }}</td><td>{{ e.missed }}</td><td>{{ e.out }}</td><td>{{ e.talk|duration }}</td></tr>{% endfor %}
+  </table></div>{% endfor %}
+</div>{% endif %}
+
+<div class="grid g2">
+  <div class="card tbl"><h3>مقاصد پرتماس <span class="hint">تماس خروجی</span></h3>
+  {% if c.categories %}<p class="hint">{% for k in c.categories %}{{ k.name }}: {{ k.count }} تماس ({{ k.talk|duration }}){{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+  <table><tr><th>شماره</th><th>نوع</th><th>تماس</th><th>مکالمه</th></tr>
+  {% for d in c.destinations %}<tr><td class="ltr">{{ d.number }}</td><td>{{ d.category }}</td><td>{{ d.count }}</td><td>{{ d.talk|duration }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">-</td></tr>{% endfor %}</table></div>
+  <div class="card tbl"><h3>تماس‌گیرندگان پرتکرار <span class="hint">تماس ورودی</span></h3><table><tr><th>شماره</th><th>تماس</th><th>بی‌پاسخ</th><th>مکالمه</th></tr>
+  {% for d in c.callers %}<tr><td class="ltr">{{ d.number }}</td><td>{{ d.count }}</td><td>{{ d.missed or '' }}</td><td>{{ d.talk|duration }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">-</td></tr>{% endfor %}</table></div>
+</div>
+
+{% if c.queues %}<div class="card tbl" id="queues"><h3>صف‌ها <span class="hint">پاسخ در {{ sl_seconds|default(20) }} ثانیهٔ اول = سطح سرویس</span></h3><table>
+<tr><th>صف</th>{% if servers|length > 1 %}<th>سرور</th>{% endif %}<th>تماس</th><th>پاسخ اپراتور</th><th>رهاشده</th><th>میانگین انتظار</th><th>بیشترین انتظار</th><th>انتظار تا رها کردن</th><th>سطح سرویس</th><th>مکالمه</th></tr>
+{% for q in c.queues %}<tr><td class="ltr">{{ q.queue }}</td>{% if servers|length > 1 %}<td>{{ pbx_names.get(q.pbx_id, '') }}</td>{% endif %}<td>{{ q.offered }}</td>
+<td>{{ q.answered }} <span class="hint">({{ q.answered_pct }}٪)</span></td><td>{% if q.abandoned %}<b>{{ q.abandoned }}</b>{% else %}0{% endif %}</td>
+<td class="ltr">{{ q.avg_wait|mmss }}</td><td class="ltr">{{ q.max_wait|mmss }}</td><td class="ltr">{{ q.avg_abandon|mmss }}</td>
+<td><span class="badge {{ 'ok' if q.sl_pct >= 80 else ('warn' if q.sl_pct >= 60 else 'err') }}">{{ q.sl_pct }}٪</span></td><td>{{ q.talk|duration }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+
+<div class="card tbl"><h3>تماس‌های بی‌پاسخی که کسی برنگشته <span class="hint">بعد از آن نه تماس خروجی به این شماره گرفته شده و نه تماس بعدی‌اش پاسخ داده شده</span></h3><table>
+<tr><th>شماره</th><th>دفعات</th><th>اولین</th><th>آخرین</th><th>داخلی‌های زنگ‌خورده</th></tr>
+{% for m in c.missed %}<tr><td class="ltr">{{ m.number }}</td><td>{{ m.count }}</td><td>{{ m.first|jdt }}</td><td>{{ m.last|jdt }}</td><td class="ltr">{{ m.exts or '-' }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">موردی نیست</td></tr>{% endfor %}
+</table></div>
+
+{% if c.unassigned and not f.ids %}<div class="card tbl" id="unassigned"><h3>داخلی‌های بدون صاحب در این دوره</h3>
+<p class="hint">تماس‌های این داخلی‌ها به نام کسی ثبت نمی‌شود تا آن‌ها را به کارمند تخصیص دهید{{ ' (از فرم کاربر، بخش «داخلی‌های تلفن»)' if 'pbx_manage' not in perms }}.</p><table>
+<tr><th>داخلی</th><th>سرور</th><th>تماس</th><th>آخرین</th>{% if 'pbx_manage' in perms %}<th>تخصیص به</th>{% endif %}</tr>
+{% for u in c.unassigned %}<tr><td class="ltr">{{ u.extension }}</td><td>{{ pbx_names.get(u.pbx_id, '-') }}</td><td>{{ u.count }}</td><td>{{ u.last|jdt }}</td>
+{% if 'pbx_manage' in perms %}<td><form class="inline" method="post" action="/pbx/assign"><input type="hidden" name="back" value="/calls?{{ qs }}">
+<input type="hidden" name="extension" value="{{ u.extension }}">{% if servers|length > 1 %}<input type="hidden" name="pbx_id" value="{{ u.pbx_id }}">{% endif %}
+<select name="user_id" required><option value="">انتخاب کارمند</option>{% for id, un, fn in users %}<option value="{{ id }}">{{ fn or un }} ({{ un }})</option>{% endfor %}</select>
+<button class="btn s">ثبت</button></form></td>{% endif %}</tr>{% endfor %}
+</table></div>{% endif %}
+
+<div class="card tbl" id="recent"><div class="top"><h3>ریز تماس‌ها <span class="hint">{{ recent|length }} مورد آخر</span></h3>
+<div>{% for k, v in [('', 'همه'), ('in', 'ورودی'), ('out', 'خروجی'), ('internal', 'داخلی')] %}<a class="btn s{{ ' p' if dir == k }}" href="?{{ qs_nodir }}{{ '&' if qs_nodir }}dir={{ k }}#recent">{{ v }}</a> {% endfor %}</div></div>
+<table><tr><th>زمان</th>{% if servers|length > 1 %}<th>سرور</th>{% endif %}<th>جهت</th><th>داخلی</th><th>کارمند</th><th>طرف مقابل</th><th>وضعیت</th><th>انتظار</th><th>مکالمه</th></tr>
+{% for r in recent %}{% set u = call_users.get(r.user_id) %}<tr><td>{{ r.ts|jdt }}</td>{% if servers|length > 1 %}<td>{{ pbx_names.get(r.pbx_id, '') }}</td>{% endif %}
+<td>{{ {'in': 'ورودی', 'out': 'خروجی', 'internal': 'داخلی'}.get(r.direction, 'نامشخص') }}</td><td class="ltr">{{ r.extension or '-' }}</td><td>{{ (u.full_name or u.username) if u else '-' }}</td>
+<td class="ltr">{{ r.other }}</td><td>{% if r.disposition == 'ANSWERED' and r.billsec %}<span class="badge ok">پاسخ داده</span>{% elif r.disposition == 'BUSY' %}<span class="badge warn">مشغول</span>{% else %}<span class="badge err">بی‌پاسخ</span>{% endif %}</td>
+<td class="ltr">{{ (r.duration - r.billsec) if r.billsec else r.duration }}s</td><td class="ltr">{{ r.billsec|mmss }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">تماسی نیست</td></tr>{% endfor %}
+</table></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+const D = {{ {'days': c.daily|map(attribute='day')|map('jdate')|list, 'in': c.daily|map(attribute='in')|list, 'out': c.daily|map(attribute='out')|list, 'missed': c.daily|map(attribute='missed')|list, 'hour': c.by_hour} | tojson }};
+const el = document.getElementById('c_daily');
+if (!el) return;
+const opts = {maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{legend:{display:true}},
+  scales:{x:{stacked:false,grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0}}}};
+if (D.days.length > 1) {
+  new Chart(el, {type:'bar', data:{labels:D.days.map(d=>d.slice(5)), datasets:[
+    {label:'ورودی', data:D.in, backgroundColor:PALETTE[0], borderRadius:4},
+    {label:'خروجی', data:D.out, backgroundColor:PALETTE[2], borderRadius:4},
+    {label:'ورودی بی‌پاسخ', data:D.missed, backgroundColor:'#94a3b8', borderRadius:4}]}, options:opts});
+} else {
+  new Chart(el, {type:'bar', data:{labels:[...Array(24).keys()].map(h=>h+':00'), datasets:[
+    {label:'تماس ورودی و خروجی', data:D.hour, backgroundColor:PALETTE[0], borderRadius:4}]},
+    options:Object.assign({}, opts, {plugins:{legend:{display:false}}})});
+}
+})();
+</script>
+{% endblock %}

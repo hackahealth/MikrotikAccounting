@@ -1,0 +1,13 @@
+<script>
+(function(){
+const R = {{ {'daily': rep.daily|map(attribute='total')|list, 'internet': rep.daily|map(attribute='internet')|list, 'internal': rep.daily|map(attribute='internal')|list, 'tunnel': rep.daily|map(attribute='tunnel')|list, 'days': rep.daily|map(attribute='day')|map('jdate')|list, 'hour': rep.by_hour, 'cats': rep.categories} | tojson }};
+const anim = {{ 'false' if printing else 'true' }};
+const opts = (extra) => Object.assign({maintainAspectRatio:false, animation: anim ? {} : false,
+  plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtBytes(c.raw)}}}, scales:{y:{ticks:{callback:v=>fmtBytes(v)}}}}, extra||{});
+new Chart(document.getElementById('m_daily'),{type:'bar',data:{labels:R.days.map(d=>d.slice(5)),datasets:[{label:'اینترنت',data:R.internet,backgroundColor:PALETTE[0]},{label:'تانل',data:R.tunnel,backgroundColor:PALETTE[4]},{label:'داخل شبکه',data:R.internal,backgroundColor:PALETTE[2]}]},
+  options:opts({plugins:{legend:{display:true},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtBytes(c.raw)}}},scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:v=>fmtBytes(v)}}}})});
+new Chart(document.getElementById('m_hour'),{type:'bar',data:{labels:[...Array(24).keys()].map(h=>h+':00'),datasets:[{data:R.hour,backgroundColor:PALETTE[0]}]},options:opts()});
+if (R.cats.length) new Chart(document.getElementById('m_cat'),{type:'doughnut',data:{labels:R.cats.map(c=>c.name),datasets:[{data:R.cats.map(c=>c.bytes),backgroundColor:PALETTE}]},
+  options:{maintainAspectRatio:false,animation:anim?{}:false,plugins:{legend:{position:'right'},tooltip:{callbacks:{label:c=>c.label+': '+fmtBytes(c.raw)}}}}});
+})();
+</script>

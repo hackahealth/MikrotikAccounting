@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>ترافیک روترها</h2></div>
+<div class="card tbl"><table>
+<tr><th>روتر</th><th>اینترنت امروز (دانلود / آپلود)</th><th>اینترنت دیروز (کل)</th><th>شبکه داخلی امروز</th><th>وضعیت</th><th></th></tr>
+{% for o in overview %}
+<tr{% if nas and o.nas.id == nas.id %} class="on"{% endif %}><td>{{ o.nas.name }}</td>
+<td class="ltr">{% if o.wan %}{{ o.down|bytes }} / {{ o.up|bytes }}{% else %}<span class="hint">WAN تعیین نشده</span>{% endif %}</td>
+<td class="ltr">{{ o.y_total|bytes if o.wan else '-' }}</td>
+<td class="ltr">{% if o.lan %}{{ o.lan_total|bytes }}{% else %}<span class="hint">تعیین نشده</span>{% endif %}</td>
+<td>{{ status.get(o.nas.name, '-') if o.nas.api_user else 'API تنظیم نشده' }}</td>
+<td><a class="btn s" href="/traffic?nas={{ o.nas.id }}">گراف</a></td></tr>
+{% else %}<tr><td colspan="6" class="muted">روتری در محدوده شما نیست</td></tr>{% endfor %}
+</table></div>
+
+{% if nas %}
+<div class="card"><form class="filters" method="get" id="tf">
+  <div><label>روتر</label><select name="nas" onchange="this.form.submit()">{% for n in routers %}<option value="{{ n.id }}" {{ 'selected' if n.id == nas.id }}>{{ n.name }}</option>{% endfor %}</select></div>
+  <div><label>روز (شمسی)</label><input name="day" class="ltr" value="{{ day_j }}" size="11"></div>
+  <div><button class="btn p">نمایش</button>{% if day != today %} <a class="btn" href="/traffic?nas={{ nas.id }}">امروز</a>{% endif %}</div>
+</form>
+{% if not nas.api_user %}<p class="hint">برای این روتر API تنظیم نشده؛ گراف از شمارنده اینترفیس‌ها که هر دقیقه با API خوانده می‌شود ساخته می‌شود.</p>{% endif %}
+</div>
+
+{% for role, title, chosen in [('wan', 'اینترنت (WAN)', wan), ('lan', 'شبکه داخلی (LAN)', lan)] %}
+<div class="card tpanel" data-role="{{ role }}">
+  <div class="top"><h3>{{ title }}</h3>
+    <div><select class="tif"><option value="">{{ 'جمع: ' ~ chosen|join('، ') if chosen else 'اینترفیسی انتخاب نشده' }}</option>
+    {% for i in ifaces %}<option value="{{ i }}">{{ i }}</option>{% endfor %}</select></div></div>
+  {% if not chosen %}<p class="hint">اینترفیس‌های {{ 'اینترنت' if role == 'wan' else 'شبکه داخلی' }} این روتر را در <a href="/nas/{{ nas.id }}/edit#net">تنظیمات روتر</a> تعیین کنید یا از فهرست بالا یک اینترفیس انتخاب کنید.</p>{% endif %}
+  <div class="grid g4">
+    <div class="stat"><div class="l">سرعت الان</div><div class="v ltr t-now">-</div><div class="hint t-now2"></div></div>
+    <div class="stat"><div class="l">بیشترین سرعت روز</div><div class="v ltr t-peak">-</div><div class="hint t-peak2"></div></div>
+    <div class="stat"><div class="l t-day-l">حجم امروز</div><div class="v ltr t-tot">-</div><div class="hint t-tot2"></div></div>
+    <div class="stat"><div class="l t-prev-l">دیروز</div><div class="v ltr t-prev">-</div><div class="hint t-prev2"></div></div>
+  </div>
+  <h4>سرعت <span class="hint">پررنگ: <span class="t-cur-name">امروز</span> · کمرنگ: <span class="t-prev-name">دیروز</span></span></h4>
+  <div class="chart tall"><canvas class="c-speed"></canvas></div>
+  <h4>حجم تجمعی در طول روز</h4>
+  <div class="chart"><canvas class="c-vol"></canvas></div>
+</div>
+{% endfor %}
+<p class="hint">داده‌ها از شمارنده اینترفیس‌های روتر هر دقیقه یک‌بار خوانده می‌شود و سرعت هر نقطه میانگین همان دقیقه است. در اینترنت «دانلود» یعنی ورودی اینترفیس WAN و در شبکه داخلی یعنی خروجی روتر به سمت کاربران. ریز دقیقه‌ای {{ config_days }} روز نگه داشته می‌شود و حجم روزانه طولانی‌تر.</p>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+const NAS = {{ nas.id }}, DAY = {{ day_j|tojson }};
+const DOWN = PALETTE[0], UP = PALETTE[2];
+const fade = (c) => c + '40';
+const labels = [...Array(1440).keys()].map(m => String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0'));
+function fmtRate(b){if(b==null)return '-';const u=['bps','Kbps','Mbps','Gbps'];let i=0;while(b>=1000&&i<3){b/=1000;i++}return (i?b.toFixed(1):Math.round(b))+' '+u[i]}
+function cum(a, upto){let s=0;return a.map((v,i)=>{s+=v||0;return (upto!=null&&i>upto)?null:s})}
+function peak(a){let m=null,at=-1;a.forEach((v,i)=>{if(v!=null&&(m==null||v>m)){m=v;at=i}});return [m,at]}
+function lastVal(a){for(let i=a.length-1;i>=0;i--)if(a[i]!=null)return [a[i],i];return [null,-1]}
+const grid = {color: getComputedStyle(document.body).getPropertyValue('--line') || '#e3e7ef'};
+function lineOpts(fmt){return {maintainAspectRatio:false, animation:false, interaction:{mode:'index',intersect:false},
+  plugins:{legend:{display:true,labels:{boxWidth:14}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.raw)}}},
+  elements:{point:{radius:0,hoverRadius:4},line:{borderWidth:2,tension:0.15}},
+  scales:{x:{ticks:{autoSkip:false,maxRotation:0,callback:(v,i)=>i%(window.innerWidth<700?360:120)===0?labels[i]:null},grid:{display:false}},y:{beginAtZero:true,grid:grid,ticks:{callback:v=>fmt(v)}}}}}
+function ds(label, data, color, faded){return {label, data, borderColor: faded ? fade(color) : color, backgroundColor: faded ? fade(color) : color,
+  borderWidth: faded ? 1.5 : 2, spanGaps: false, order: faded ? 2 : 1}}
+
+document.querySelectorAll('.tpanel').forEach(panel => {
+  const role = panel.dataset.role, sel = panel.querySelector('.tif');
+  let speed, vol;
+  const $ = (c) => panel.querySelector(c);
+  async function load(){
+    const q = new URLSearchParams({nas: NAS, role, day: DAY, iface: sel.value});
+    let r; try { r = await (await fetch('/api/traffic?' + q)).json(); } catch(e) { return; }
+    const upto = r.is_today ? r.minute : null;
+    const curName = r.is_today ? 'امروز' : r.day, prevName = r.is_today ? 'دیروز' : r.prev_day;
+    $('.t-cur-name').textContent = curName; $('.t-prev-name').textContent = prevName;
+    const sData = [ds('دانلود ' + prevName, r.prev.down, DOWN, true), ds('آپلود ' + prevName, r.prev.up, UP, true),
+                   ds('دانلود ' + curName, r.cur.down, DOWN, false), ds('آپلود ' + curName, r.cur.up, UP, false)];
+    const vData = [ds('دانلود ' + prevName, cum(r.prev.down_b), DOWN, true), ds('آپلود ' + prevName, cum(r.prev.up_b), UP, true),
+                   ds('دانلود ' + curName, cum(r.cur.down_b, upto), DOWN, false), ds('آپلود ' + curName, cum(r.cur.up_b, upto), UP, false)];
+    if (!speed) {
+      speed = new Chart($('.c-speed'), {type:'line', data:{labels, datasets:sData}, options:lineOpts(fmtRate)});
+      vol = new Chart($('.c-vol'), {type:'line', data:{labels, datasets:vData}, options:lineOpts(fmtBytes)});
+    } else { speed.data.datasets = sData; vol.data.datasets = vData; speed.update('none'); vol.update('none'); }
+    const [dn, at] = lastVal(r.cur.down), [up] = lastVal(r.cur.up);
+    $('.t-now').textContent = r.is_today && at >= 0 && r.minute - at <= 3 ? fmtRate(dn) : '-';
+    $('.t-now2').textContent = r.is_today && at >= 0 && r.minute - at <= 3 ? 'آپلود ' + fmtRate(up) + ' · ' + labels[at] : (r.is_today ? 'داده تازه‌ای نرسیده' : 'فقط برای امروز');
+    const [pd, pat] = peak(r.cur.down), [pu, pau] = peak(r.cur.up);
+    $('.t-peak').textContent = fmtRate(pd);
+    $('.t-peak2').textContent = (pat >= 0 ? 'ساعت ' + labels[pat] : '') + (pu != null ? ' · آپلود ' + fmtRate(pu) : '');
+    $('.t-day-l').textContent = 'حجم ' + curName;
+    $('.t-tot').textContent = fmtBytes(r.cur.total_down + r.cur.total_up);
+    $('.t-tot2').textContent = 'دانلود ' + fmtBytes(r.cur.total_down) + ' · آپلود ' + fmtBytes(r.cur.total_up);
+    $('.t-prev-l').textContent = prevName;
+    const prevSame = upto != null ? (cum(r.prev.down_b)[upto] || 0) + (cum(r.prev.up_b)[upto] || 0) : null;
+    $('.t-prev').textContent = fmtBytes(r.prev.total_down + r.prev.total_up);
+    $('.t-prev2').textContent = prevSame != null ? 'تا همین ساعت: ' + fmtBytes(prevSame) : 'دانلود ' + fmtBytes(r.prev.total_down) + ' · آپلود ' + fmtBytes(r.prev.total_up);
+    return r.is_today;
+  }
+  sel.addEventListener('change', load);
+  load().then(live => { if (live) setInterval(load, 60000); });
+});
+});
+</script>
+{% endif %}
+{% endblock %}

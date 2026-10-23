@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_macros.html" import quota_fields, period_select, hours_help, rate_help %}
+{% block content %}
+<div class="top"><h2>{{ 'ویرایش کاربر ' ~ user.username if user else 'کاربر جدید' }}</h2><div>{% if user and 'grants_manage' in perms %}<a class="btn" href="/grants?user={{ user.id }}">مجوز موقت</a> {% endif %}{% if user and 'security_manage' in perms %}<form method="post" action="/security/lock" style="display:inline"><input type="hidden" name="kind" value="user"><input type="hidden" name="value" value="{{ user.username }}"><input type="hidden" name="reason" value="قفل دستی از فرم کاربر"><input type="hidden" name="back" value="/users/{{ user.id }}/edit"><button class="btn d" onclick="return confirm('کاربر قفل شود؟')">قفل کاربر</button></form> {% endif %}<a class="btn" href="/users">بازگشت</a></div></div>
+<form method="post" action="/users/save">
+<input type="hidden" name="id" value="{{ user.id if user else '' }}">
+<div class="grid g2">
+<div class="card"><h3>اطلاعات کاربر</h3>
+  <div class="fg"><label>نام کاربری</label><input name="username" class="ltr" value="{{ user.username if user else '' }}" {{ 'readonly' if user and user.source in ('ldap', 'router') }}></div>
+  {% if not user or user.source == 'local' %}
+  <div class="fg"><label>رمز عبور {{ '(خالی = بدون تغییر)' if user }}</label><input name="password" class="ltr" value="" placeholder="{{ '••••••' if password }}"></div>
+  {% elif user.source == 'router' %}<p class="hint">این اکانت محلی روتر است (هات‌اسپات/VPN خود میکروتیک)؛ رمز و محدودیت‌های آن در «اکانت‌های محلی میکروتیک» تنظیم می‌شود. اینجا فقط برای گزارش و دفتر/واحد است.</p>
+  {% else %}<p class="hint">این کاربر از Active Directory است و رمز آن در AD بررسی می‌شود (روش PAP).</p>{% endif %}
+  <div class="fg"><label>نام کامل</label><input name="full_name" value="{{ user.full_name if user else '' }}"></div>
+  <div class="grid g3">
+    <div class="fg"><label>ایمیل</label><input name="email" class="ltr" value="{{ user.email if user else '' }}"></div>
+    <div class="fg"><label>موبایل</label><input name="mobile" class="ltr" value="{{ user.mobile if user else '' }}" placeholder="09121234567"></div>
+    <div class="fg"><label>تلفن</label><input name="phone" class="ltr" value="{{ user.phone if user else '' }}"></div>
+  </div>
+  <div class="grid g3">
+    <div class="fg"><label>سمت</label><input name="title" value="{{ user.title if user else '' }}"></div>
+    <div class="fg"><label>شرکت</label><input name="company" value="{{ user.company if user else '' }}"></div>
+    <div class="fg"><label>محل / شهر</label><input name="city" value="{{ user.city if user else '' }}"></div>
+  </div>
+  <div class="fg"><label>گروه</label><select name="group_id"><option value="">بدون گروه</option>
+    {% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if user and user.group_id == g.id }}>{{ g.name }}</option>{% endfor %}</select></div>
+  <div class="grid g3">
+    <div class="fg"><label>دفتر</label><select name="office_id"><option value="">-</option>
+      {% for o in offices %}<option value="{{ o.id }}" {{ 'selected' if user and user.office_id == o.id }}>{{ o.name }}</option>{% endfor %}</select></div>
+    <div class="fg"><label>واحد</label><select name="department_id"><option value="">-</option>
+      {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if user and user.department_id == d.id }}>{{ d.name }}{{ ' (' ~ d.office.name ~ ')' if d.office }}</option>{% endfor %}</select></div>
+    <div class="fg"><label>کد پرسنلی</label><input name="personnel_code" class="ltr" value="{{ user.personnel_code if user else '' }}"></div>
+  </div>
+  <div class="fg"><label><input type="checkbox" name="enabled" value="1" {{ 'checked' if not user or user.enabled }}> فعال</label></div>
+  {% if user and user.source == 'ldap' %}<div class="fg"><label>دسترسی به پنل</label>
+    {% if panel %}<span class="badge ok">{{ ROLES[panel.role][0] }}</span>{% if not panel.enabled %} <span class="badge err">غیرفعال</span>{% endif %}
+      {% if 'panel_users' in perms %}<a class="btn s" href="/admins/{{ panel.id }}/edit">ویرایش دسترسی پنل</a>{% endif %}
+    {% else %}<span class="hint">ندارد</span>{% if 'panel_users' in perms %} <a class="btn s" href="/admins/new?user={{ user.id }}">دادن دسترسی پنل (با همین حساب AD)</a>{% endif %}{% endif %}</div>{% endif %}
+  {% if user and user.source == 'ldap' %}<div class="fg"><label><input type="checkbox" name="ad_write" value="1" checked> تغییر نام، ایمیل، موبایل، تلفن، سمت، شرکت، محل، دفتر، واحد، کد پرسنلی و گروه در Active Directory هم ثبت شود</label>
+    <div class="hint">گروه: کاربر به گروه AD نگاشت‌شده به گروه جدید اضافه و از گروه‌های نگاشت‌شده دیگر خارج می‌شود. اگر این تیک برداشته شود، تغییرات با همگام‌سازی بعدی AD برمی‌گردد.</div></div>{% endif %}
+  <div class="fg"><label>تاریخ انقضا (شمسی، مثل 1405/12/29)</label><input name="expire_at" class="ltr" value="{{ user.expire_at|jdate if user and user.expire_at else '' }}"></div>
+  <div class="fg"><label>یادداشت</label><textarea name="notes" rows="2">{{ user.notes if user else '' }}</textarea></div>
+</div>
+<div class="card"><h3>محدودیت‌ها (خالی = از گروه)</h3>
+  <div class="fg"><label>سرعت</label><input name="rate_limit" class="ltr" value="{{ user.rate_limit if user else '' }}">{{ rate_help() }}</div>
+  {{ quota_fields(user.quota_mb if user else none, true) }}
+  <div class="fg"><label>دوره سهمیه</label>{{ period_select(user.quota_period if user else '', true) }}</div>
+  <div class="fg"><label>ساعات مجاز اتصال</label><input name="allowed_hours" value="{{ user.allowed_hours if user else '' }}">{{ hours_help() }}</div>
+  <div class="fg"><label>تعداد اتصال همزمان (خالی = از گروه، ۰ = نامحدود)</label><input name="simultaneous_use" class="ltr" value="{{ user.simultaneous_use if user and user.simultaneous_use is not none else '' }}"></div>
+  <div class="fg"><label>IP ثابت</label><input name="static_ip" class="ltr" value="{{ user.static_ip if user else '' }}"></div>
+  <div class="fg"><label>MAC های مجاز (با کاما؛ خالی = همه)</label><input name="allowed_macs" class="ltr" value="{{ user.allowed_macs if user else '' }}"></div>
+</div>
+</div>
+<button class="btn p">ذخیره</button>
+</form>
+{% if user and (exts or pbx_names) %}<div class="card tbl" id="ext" style="margin-top:16px"><h3>داخلی‌های تلفن (ایزابل)</h3>
+<p class="hint">تماس‌های هر داخلی در بازه تخصیص به نام این شخص ثبت می‌شود. با تغییر داخلی، داخلی قبلی را «پایان» بزنید تا سوابق قبلی به نام او بماند.</p>
+<table><tr><th>داخلی</th><th>سرور</th><th>از</th><th>تا</th><th></th></tr>
+{% for a in exts %}<tr><td class="ltr">{{ a.extension }}</td><td>{{ pbx_names.get(a.pbx_id, 'همه سرورها') }}</td><td>{{ a.start|jdate if a.start else 'از ابتدا' }}</td><td>{{ a.end|jdate if a.end else 'تاکنون' }}</td>
+<td style="white-space:nowrap">{% if not a.end %}<form class="inline" method="post" action="/users/{{ user.id }}/ext/{{ a.id }}/end"><input name="end" class="ltr" size="10" placeholder="تاریخ پایان (خالی = امروز)"> <button class="btn s">پایان</button></form>{% endif %}
+<form class="inline" method="post" action="/users/{{ user.id }}/ext/{{ a.id }}/delete" onsubmit="return confirm('حذف شود؟ تماس‌های این داخلی دیگر به نام این شخص نخواهد بود.')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="muted">داخلی ندارد</td></tr>{% endfor %}</table>
+<form method="post" action="/users/{{ user.id }}/ext" class="filters" style="margin-top:10px">
+  <div><label>داخلی جدید</label><input name="extension" class="ltr" size="8" required></div>
+  {% if pbx_names|length > 1 %}<div><label>سرور</label><select name="pbx_id"><option value="">همه سرورها</option>{% for id, name in pbx_names.items() %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></div>{% endif %}
+  <div><label>از تاریخ (شمسی، خالی = همیشه)</label><input name="start" class="ltr" size="11"></div>
+  <div><label>تا تاریخ (خالی = تاکنون)</label><input name="end" class="ltr" size="11"></div>
+  <div><label><input type="checkbox" name="close_current" value="1"> داخلی‌های فعلی از همین تاریخ تمام شوند</label></div>
+  <div><button class="btn p">افزودن</button></div>
+</form></div>{% endif %}
+{% if devs %}<div class="card tbl" style="margin-top:16px"><h3>دستگاه‌هایی که این کاربر روی آن‌ها وارد شده</h3><table>
+<tr><th>MAC</th><th>نوع</th><th>روتر</th><th>از</th><th>تا</th><th>مدت</th></tr>
+{% for h in devs %}<tr><td class="ltr"><a href="/devices/{{ h.mac }}">{{ h.mac }}</a></td><td>{{ dev_types.get(h.mac, '')|devtype }}</td><td>{{ nas_names.get(h.nas_id, '-') }}</td>
+<td>{{ h.first_seen|jdt }}</td><td>{{ h.last_seen|jdt }}</td><td>{{ (h.last_seen - h.first_seen).total_seconds()|duration }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+{% endblock %}

@@ -1,0 +1,18 @@
+# Pinned versions bundled in the Windows package (tested together)
+fastapi==0.143.1
+starlette==1.6.0
+uvicorn==0.53.0
+SQLAlchemy==2.1.4
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+python-multipart==0.0.32
+itsdangerous==2.2.0
+pydantic==2.13.5
+pyrad==2.5.4
+ldap3==2.9.1
+librouteros==4.2.2
+pycryptodome==4.0.0
+cryptography==50.0.1
+tzdata
+openpyxl==3.1.5
+paramiko==5.0.0

@@ -1,0 +1,11 @@
+# runtime data: database, encryption key, logs, uploaded hotspot packages
+data/
+runtime/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+*.db
+*.db-shm
+*.db-wal
+secret.key

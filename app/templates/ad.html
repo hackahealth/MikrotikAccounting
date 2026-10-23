@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>اتصال به Active Directory ویندوز</h2><span class="badge">{{ ldap_users }} کاربر AD در سیستم</span></div>
+<div class="grid g2">
+{% if 'ad_manage' in perms %}<div class="card"><h3>تنظیمات</h3>
+<form method="post" action="/ad/save">
+<div class="grid g2">
+  <div class="fg"><label>آدرس Domain Controller</label><input name="ldap_server" class="ltr" value="{{ cfg.ldap_server }}" placeholder="dc1.corp.local"></div>
+  <div class="fg"><label>پورت (389 یا 636 برای LDAPS)</label><input name="ldap_port" class="ltr" value="{{ cfg.ldap_port or 389 }}"></div>
+  <div class="fg"><label>دامنه (برای ورود user@domain)</label><input name="ldap_domain" class="ltr" value="{{ cfg.ldap_domain }}" placeholder="corp.local"></div>
+  <div class="fg"><label><input type="checkbox" name="ldap_use_ssl" value="1" {{ 'checked' if cfg.ldap_use_ssl == '1' }}> LDAPS (توصیه می‌شود)</label></div>
+  <div class="fg"><label>کاربر سرویس برای خواندن AD</label><input name="ldap_bind_user" class="ltr" value="{{ cfg.ldap_bind_user }}" placeholder="svc-radius"></div>
+  <div class="fg"><label>رمز کاربر سرویس</label><input name="ldap_bind_password" type="password" class="ltr" value="{{ cfg.ldap_bind_password }}"></div>
+</div>
+<div class="fg"><label>Base DN — مسیری از AD که کاربران و گروه‌ها در آن جستجو می‌شوند (خالی = کل دامنه، خودکار)</label><input name="ldap_base_dn" class="ltr" value="{{ cfg.ldap_base_dn }}" placeholder="خالی = DC=corp,DC=local  یا فقط یک OU: OU=Staff,DC=corp,DC=local">
+  <div class="hint">برای دامنه <span class="ltr">corp.local</span> کل دامنه می‌شود <span class="ltr">DC=corp,DC=local</span>. اگر فقط کاربران یک OU را می‌خواهید، مسیر آن را بنویسید (در ویندوز: Active Directory Users and Computers ← View ← Advanced Features ← Properties پوشه ← Attribute Editor ← distinguishedName).</div></div>
+<div class="fg"><label>فیلتر اضافه (اختیاری) — مثلاً فقط اعضای یک گروه</label><input name="ldap_user_filter" class="ltr" value="{{ cfg.ldap_user_filter }}" placeholder="(memberOf=CN=Internet-Users,OU=Groups,DC=corp,DC=local)"></div>
+<div class="fg"><label>گروه پیش‌فرض برای کاربران AD</label><select name="ldap_default_group"><option value="">بدون گروه</option>
+  {% for g in groups %}<option {{ 'selected' if cfg.ldap_default_group == g.name }}>{{ g.name }}</option>{% endfor %}</select></div>
+<div class="fg"><label><input type="checkbox" name="ldap_auto_sync" value="1" {{ 'checked' if cfg.ldap_auto_sync == '1' }}> همگام‌سازی خودکار هر ساعت</label></div>
+<div class="fg"><label><input type="checkbox" name="ldap_auto_org" value="1" {{ 'checked' if cfg.ldap_auto_org != '0' }}> دفتر و واحد کاربران از AD خوانده شود (فیلدهای Office و Department؛ اگر وجود نداشت ساخته می‌شود)</label></div>
+<button class="btn p">ذخیره</button>
+</form></div>{% endif %}
+<div class="card"><h3>عملیات</h3>
+  {% if 'ad_manage' in perms %}<form class="inline" method="post" action="/ad/test"><button class="btn">تست اتصال</button></form>{% endif %}
+  {% if 'ad_sync' in perms %}<form class="inline" method="post" action="/ad/sync"><button class="btn p">همگام‌سازی کاربران از AD</button></form>{% endif %}
+  {% if 'ad_manage' in perms %}<form class="inline" method="post" action="/ad/groups"><button class="btn">نمایش گروه‌های AD</button></form>{% endif %}
+  <p class="hint">کاربران AD با همان نام کاربری و رمز ویندوز وارد می‌شوند. رمز در این سیستم ذخیره نمی‌شود و هر بار با AD بررسی می‌شود؛
+  پس روش احراز هویت باید <b>PAP</b> باشد (هات‌اسپات: login-by=http-pap روی HTTPS؛ VPN: SSTP یا OpenVPN یا L2TP/IPsec با PAP).
+  کاربری که در AD غیرفعال یا حذف شود، در همگام‌سازی بعدی اینجا هم غیرفعال می‌شود. اگر کاربر AD هنوز همگام نشده باشد، در اولین ورود موفق خودکار ساخته می‌شود.</p>
+  <p class="hint">برای نگاشت گروه: DN گروه AD را در فرم «گروه‌ها» وارد کنید تا سرعت/حجم/ساعات آن گروه روی اعضای AD اعمال شود.</p>
+  {% if ad_groups %}<h3 style="margin-top:14px">گروه‌های AD ({{ ad_groups|length }})</h3>
+  <input class="ltr" placeholder="جستجو..." oninput="const q=this.value.toLowerCase();document.querySelectorAll('#adg tr[data-q]').forEach(r=>r.style.display=r.dataset.q.includes(q)?'':'none')" style="margin-bottom:8px">
+  <div class="tbl" style="max-height:480px;overflow:auto"><table id="adg"><tr><th>گروه AD</th><th>اعضا</th><th>DN (برای فرم گروه‌ها)</th><th>گروه برنامه</th></tr>
+  {% for cn, dn, n in ad_groups %}<tr data-q="{{ (cn ~ ' ' ~ dn)|lower }}"><td>{{ cn }}</td><td>{{ n }}</td><td class="ltr hint"><span style="user-select:all">{{ dn }}</span></td><td>{{ mapped.get(dn|lower, '-') }}</td></tr>{% endfor %}</table></div>{% endif %}
+</div>
+</div>
+{% endblock %}
