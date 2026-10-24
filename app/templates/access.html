@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>کنترل دسترسی و سایت‌ها</h2><a class="btn" href="/netobjects">سرورها و دستگاه‌های شبکه</a></div>
+<p class="hint">قوانین این صفحه روی روترهایی که پایین «فعال» شده‌اند در فایروال میکروتیک نوشته می‌شود (همه با توضیح <span class="ltr">macc</span>؛ قوانین دیگر روتر دست نمی‌خورند) و با هر تغییر، در دقیقهٔ بعد به‌روز می‌شود.
+<b>قبل از ورود:</b> هات‌اسپات میکروتیک تا کاربر وارد نشود به هیچ جا راه نمی‌دهد؛ فقط دستگاه‌های «استثنا» (فهرست MAC/IP و نوع‌های انتخاب‌شده مثل تلفن IP) بدون ورود و بدون محدودیت کار می‌کنند.
+<b>بعد از ورود:</b> سایت‌های مسدود باز نمی‌شوند و اگر محدودیت داخلی روشن باشد فقط مقاصد مجاز داخل شبکه در دسترس‌اند. کاربری که «مجوز موقت اینترنت آزاد» دارد از مسدودی سایت‌ها و محدودیت داخلی معاف است.</p>
+
+<div class="card"><h3>تنظیمات</h3>
+<form method="post" action="/access/settings">
+<div class="grid g3">
+  <div class="fg"><label>سایت‌ها</label>
+    <label><input type="radio" name="sites_mode" value="block" {{ 'checked' if st.sites_mode != 'allow' }}> همه آزاد، جز فهرست مسدود</label><br>
+    <label><input type="radio" name="sites_mode" value="allow" {{ 'checked' if st.sites_mode == 'allow' }}> همه مسدود، جز فهرست مجاز (سخت‌گیرانه)</label><br>
+    <label><input type="checkbox" name="block_page" value="1" {{ 'checked' if st.block_page }}> صفحهٔ «دسترسی مسدود است» برای سایت‌های http</label></div>
+  <div class="fg"><label>مقاصد داخل شبکه بعد از ورود</label>
+    <label><input type="checkbox" name="internal_restrict" value="1" {{ 'checked' if st.internal_restrict }}> کاربران هات‌اسپات فقط به مقاصد مجاز داخلی دسترسی داشته باشند</label>
+    <div class="hint">مقاصد مجاز: سرورهایی که در «سرورها و دستگاه‌های شبکه» گزینهٔ «کاربران دسترسی دارند» را دارند ({{ users_ok|length }} مورد) و آدرس‌های زیر. شبکهٔ داخلی: <span class="ltr">{{ internal }}</span></div>
+    <textarea name="allowed_internal" class="ltr" rows="3" placeholder="192.168.88.2   # DC و DNS">{{ st.allowed_internal }}</textarea></div>
+  <div class="fg"><label>نوع دستگاه‌هایی که بدون ورود آزادند</label>
+    {% for k, v in types %}{% if k != "unknown" %}<label style="display:inline-block;margin-left:10px"><input type="checkbox" name="exempt_types" value="{{ k }}" {{ 'checked' if k in st.exempt_types }}> {{ v }}</label>{% endif %}{% endfor %}
+    <div class="hint">نوع هر دستگاه در صفحهٔ «دستگاه‌ها» تعیین می‌شود.</div></div>
+</div>
+<button class="btn p">ذخیره</button>
+</form></div>
+
+<div class="card" id="sites"><h3>سایت‌ها و آدرس‌ها</h3>
+<form method="post" action="/access/sites/add" class="filters">
+  <div><label>دامنه یا آدرس (هر خط یکی؛ example.com زیردامنه‌ها را هم می‌گیرد)</label><textarea name="patterns" class="ltr" rows="3" placeholder="instagram.com&#10;youtube.com&#10;5.6.7.8"></textarea></div>
+  <div><label>نوع</label><select name="action"><option value="block">مسدود</option><option value="allow">مجاز (در حالت سخت‌گیرانه)</option></select></div>
+  <div><label>توضیح</label><input name="note"></div>
+  <div><button class="btn p">افزودن</button></div>
+</form>
+<div class="tbl"><table><tr><th>آدرس</th><th>نوع</th><th>توضیح</th><th>ثبت</th><th></th></tr>
+{% for r in rules %}<tr style="{{ '' if r.enabled else 'opacity:.5' }}"><td class="ltr">{{ r.pattern }}</td><td>{% if r.action == 'block' %}<span class="badge err">مسدود</span>{% else %}<span class="badge ok">مجاز</span>{% endif %}</td><td>{{ r.note }}</td><td class="hint">{{ r.created_by }} {{ r.created_at|jdt }}</td>
+<td style="white-space:nowrap"><form class="inline" method="post" action="/access/sites/{{ r.id }}/toggle"><button class="btn s">{{ 'غیرفعال' if r.enabled else 'فعال' }}</button></form>
+<form class="inline" method="post" action="/access/sites/{{ r.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="muted">فهرست خالی است</td></tr>{% endfor %}</table></div>
+<p class="hint">روتر دامنه‌ها را خودش به IP تبدیل و به‌روز می‌کند (address-list با نام دامنه). سایت‌های https با صفحهٔ خطای مرورگر بسته می‌شوند؛ صفحهٔ «مسدود است» فقط برای http نمایش داده می‌شود (برای آن «آدرس پنل» در صفحهٔ فولدر hotspot باید IP باشد).</p></div>
+
+<div class="card" id="exempt"><h3>استثناها (بدون ورود و بدون محدودیت)</h3>
+<form method="post" action="/access/exempt/add" class="filters">
+  <div><label>MAC یا IP (هر خط یکی)</label><textarea name="values" class="ltr" rows="3" placeholder="AA:BB:CC:DD:EE:FF&#10;192.168.88.40"></textarea></div>
+  <div><label>روتر</label><select name="nas_id"><option value="">همه</option>{% for n in routers %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}</select></div>
+  <div><label>توضیح</label><input name="note" placeholder="پرینتر طبقه ۲"></div>
+  <div><button class="btn p">افزودن</button></div>
+</form>
+<div class="tbl"><table><tr><th>MAC / IP</th><th>روتر</th><th>توضیح</th><th></th></tr>
+{% for e in exempts %}<tr><td class="ltr">{{ e.value }}</td><td>{{ nas_names.get(e.nas_id, 'همه') if e.nas_id else 'همه' }}</td><td>{{ e.note }}</td>
+<td><form class="inline" method="post" action="/access/exempt/{{ e.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
+{% else %}<tr><td colspan="4" class="muted">استثنایی ثبت نشده</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3>آدرس‌های حساس</h3>
+{% if sensitive %}<div class="tbl"><table><tr><th>نام</th><th>آدرس</th><th>اقدام</th><th>مبدأهای مجاز</th></tr>
+{% for o in sensitive %}<tr><td><a href="/netobjects?edit={{ o.id }}">{{ o.name }}</a></td><td class="ltr">{{ o.addresses|replace('\n', '، ') }}</td><td>{{ 'مسدود + الارم' if o.sensitive_action == 'block' else 'الارم' }}</td><td class="ltr">{{ (o.allowed_from or '-')|replace('\n', '، ') }}</td></tr>{% endfor %}</table></div>
+{% else %}<p class="muted">هنوز آدرس حساسی تعریف نشده؛ در «سرورها و دستگاه‌های شبکه» گزینهٔ «حساس است» را بزنید (مثلاً NVR یا سرور مالی).</p>{% endif %}
+<p class="hint">الارم از دو راه: ترافیک NetFlow (بدون نیاز به قانون روی روتر) و قانون فایروال روی روترهای فعال که مبدأ را ثبت می‌کند. هر مبدأ برای هر آدرس حداکثر ساعتی یک بار در «هشدارها» اعلان می‌شود.</p></div>
+
+<div class="card"><h3>روترها</h3><div class="tbl"><table>
+<tr><th>روتر</th><th>وضعیت</th><th>آخرین اعمال</th><th></th></tr>
+{% for n in routers %}<tr><td>{{ n.name }}</td><td>{% if n.acl_enabled %}<span class="badge ok">فعال</span>{% else %}<span class="badge">غیرفعال</span>{% endif %}<div class="hint">{{ n.acl_status }}</div></td><td>{{ n.acl_applied_at|jdt if n.acl_applied_at else '-' }}</td>
+<td style="white-space:nowrap"><a class="btn s" href="/access/preview/{{ n.id }}">پیش‌نمایش دستورات</a>
+{% if n.acl_enabled %}<form class="inline" method="post" action="/access/router/{{ n.id }}"><input type="hidden" name="op" value="apply"><button class="btn s">اعمال دوباره</button></form>
+<form class="inline" method="post" action="/access/router/{{ n.id }}" onsubmit="return confirm('همهٔ قوانین پنل از این روتر حذف شود؟')"><input type="hidden" name="op" value="disable"><button class="btn s d">غیرفعال و حذف قوانین</button></form>
+{% else %}<form class="inline" method="post" action="/access/router/{{ n.id }}" onsubmit="return confirm('قوانین روی این روتر نوشته شود؟')"><input type="hidden" name="op" value="enable"><label class="hint"><input type="checkbox" name="confirm" value="1"> پیش‌نمایش را دیدم</label> <button class="btn s p">فعال‌سازی</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">روتری با API تعریف نشده</td></tr>{% endfor %}</table></div></div>
+
+<div class="card"><h3>آخرین دسترسی‌های غیرمجاز</h3><div class="tbl"><table><tr><th>زمان</th><th>عنوان</th><th>شرح</th></tr>
+{% for a in viol %}<tr><td>{{ a.ts|jdt }}</td><td>{% if a.link %}<a href="{{ a.link }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</td><td class="wrap">{{ a.body }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">موردی ثبت نشده</td></tr>{% endfor %}</table></div></div>
+{% endblock %}

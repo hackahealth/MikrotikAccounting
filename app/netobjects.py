@@ -40,7 +40,8 @@ class Index:
         try:
             objs, by_id = [], {}
             for o in db.query(NetObject).all():
-                d = {"id": o.id, "nas_id": o.nas_id, "kind": o.kind, "name": o.name}
+                d = {"id": o.id, "nas_id": o.nas_id, "kind": o.kind, "name": o.name, "sensitive": bool(o.sensitive),
+                     "allowed_from": o.allowed_from or ""}
                 by_id[o.id] = d
                 for n in netscope.parse_ranges(o.addresses)[0]:
                     objs.append((n, d))
@@ -113,6 +114,12 @@ class Index:
         where = netscope.scope.classify_for(rid, remote, f.get("in_if", 0), f.get("out_if", 0))
         robj = self.match(rid, remote, where)
         lobj = self.match(rid, local, "lan")
+        if robj and robj.get("sensitive") and (not lobj or lobj["id"] != robj["id"]):
+            try:
+                from . import access
+                access.flow_alarm(SessionLocal, rid, local, robj, ts)
+            except Exception:              # noqa: BLE001 - an alarm must not lose the flow
+                log.exception("sensitive access alarm")
         key = (rid, ts.date(), self.mac(rid, local), local, "obj" if robj else where,
                robj["id"] if robj else 0, lobj["id"] if lobj else 0)
         with self.lock:

@@ -69,6 +69,7 @@ def _list(conn, *path):
 
 def snapshot(nas: Nas):
     """Pull everything needed in one connection."""
+    from . import wancheck
     conn = api(nas)
     try:
         return {
@@ -83,6 +84,7 @@ def snapshot(nas: Nas):
             "addresses": _list(conn, "ip", "address"),
             "arp": _list(conn, "ip", "arp"),
             "pings": {t: ping(conn, t) for t in split_targets(getattr(nas, "monitor_targets", ""))},
+            "wan": wancheck.read(conn),
         }
     finally:
         conn.close()
@@ -117,6 +119,8 @@ def network_info(nas: Nas):
         routes = _list(conn, "ip", "route")
         dhcp = _list(conn, "ip", "dhcp-client")
         pools = _list(conn, "ip", "pool")
+        from . import wancheck
+        children = wancheck.read(conn)["children"]
     finally:
         conn.close()
     names = {i.get("name") for i in ifaces if i.get("name")}
@@ -158,9 +162,12 @@ def network_info(nas: Nas):
     for i in ifaces:
         if str(i.get("type", "")).startswith(("pppoe-out", "lte")) and _yes(i.get("running", True)):
             add(i.get("name"))
+    # the port under a PPPoE / VLAN that is itself WAN is not counted twice
+    under = {c["parent"] for c in children if c["name"] in wan}
+    wan = [w for w in wan if w not in under]
     lan = []
     for net, iface, dyn in nets:
-        if iface in wan or dyn or net.prefixlen == net.max_prefixlen:
+        if iface in wan or iface in under or dyn or net.prefixlen == net.max_prefixlen:
             continue
         if str(net) not in lan:
             lan.append(str(net))

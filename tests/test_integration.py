@@ -2202,3 +2202,139 @@ def test_history_retention_purge_and_routeros_update(env, monkeypatch, tmp_path)
     db.delete(db.get(Nas, nid))
     db.commit()
     db.close()
+
+
+def test_wan_check_ping_verify_access_control_and_windows_pages(env, monkeypatch):
+    import json
+    from datetime import datetime, timedelta
+
+    from app import access, jobs, mgmt, pingcheck, routeros, wancheck
+    from app.db import (AccessExempt, Alert, Device, IfaceDaily, NetObject, SiteRule, now, set_setting)
+    from app.web import app
+    from tests.fake_ros import FakeRouter
+    db = SessionLocal()
+    nas = Nas(name="acl-yazd", ip="10.55.0.1", secret="s", api_user="api", lan_ranges="192.168.50.0/24",
+              wan_interfaces="ether1,ether3,Pishgaman,wlan1")
+    db.add(nas)
+    db.commit()
+    nid = nas.id
+    # --- WAN: Pishgaman (PPPoE) runs over ether1; wlan1 is a port of the LAN bridge
+    snap = {"interfaces": [{"name": n, "type": t} for n, t in (("ether1", "ether"), ("ether3", "ether"),
+                                                               ("Pishgaman", "pppoe-out"), ("wlan1", "wlan"),
+                                                               ("bridge", "bridge"))],
+            "addresses": [{"address": "192.168.50.1/24", "interface": "bridge"},
+                          {"address": "5.5.5.2/30", "interface": "ether3"}],
+            "wan": {"children": [{"name": "Pishgaman", "parent": "ether1"}],
+                    "bridge_ports": [{"interface": "wlan1", "bridge": "bridge"}],
+                    "routes": [{"gateway": "Pishgaman", "immediate-gw": "Pishgaman", "gateway-status": ""},
+                               {"gateway": "5.5.5.1", "immediate-gw": "5.5.5.1%ether3", "gateway-status": ""}]}}
+    nas.iface_facts = json.dumps(wancheck.learn(nas, snap))
+    day = now().date()
+    for name, rx, tx in (("ether1", 10_000, 2_000), ("Pishgaman", 9_000, 1_800), ("ether3", 5_000, 1_000),
+                         ("wlan1", 100, 900_000)):
+        db.add(IfaceDaily(nas_id=nid, iface=name, day=day, rx=rx, tx=tx))
+    db.commit()
+    start = datetime.combine(day, datetime.min.time())
+    rt = mgmt.router_internet(db, start, start + timedelta(days=1), [nas])
+    row = rt["rows"][0]
+    assert row["wan_rx"] == 14_000 and row["wan_tx"] == 2_800               # Pishgaman + ether3 only
+    counted = {i["name"]: i["counted"] for i in row["ifaces"]}
+    assert counted == {"ether1": False, "ether3": True, "Pishgaman": True, "wlan1": False}
+    assert set(row["suggested"]) == {"Pishgaman", "ether3"}
+    # --- online devices: a static ARP entry alone is a weak sign; a device failing the ping check drops off
+    weak = {"arp": [{"mac-address": "AA:00:00:00:00:01", "address": "192.168.50.11", "status": "permanent"}],
+            "hotspot_hosts": [{"mac-address": "AA:00:00:00:00:02", "address": "192.168.50.12"}],
+            "leases": [], "hotspot_active": [], "ppp_active": []}
+    assert not jobs._arp_live(weak["arp"][0])
+    assert jobs._arp_live({"mac-address": "AA:00:00:00:00:09", "address": "1.1.1.1", "status": "reachable"})
+    ts = now()
+    pingcheck.DEAD.clear()
+    assert jobs._record_devices(db, nas, weak, ts) == 1                    # the hotspot host (weak, not dead yet)
+    db.commit()
+    monkeypatch.setattr(pingcheck, "check_router", lambda n, targets: {m: False for m, ip in targets})
+    pingcheck.run_once()
+    db.expire_all()
+    d = db.query(Device).filter(Device.mac == "AA:00:00:00:00:02").one()
+    assert d.ping_ok is False and pingcheck.is_dead(d.mac)
+    assert pingcheck.online_filter(db.query(Device).filter(Device.mac == d.mac), now()).count() == 0
+    assert jobs._record_devices(db, nas, weak, now()) == 0                 # weak sign of a silent device: ignored
+    strong = dict(weak, hotspot_hosts=[{"mac-address": "AA:00:00:00:00:02", "address": "192.168.50.12",
+                                         "host-dead-time": "5s"}])
+    assert jobs._record_devices(db, nas, strong, now()) == 1 and not pingcheck.is_dead(d.mac)
+    db.commit()
+    # --- access control written to the router
+    d.device_type = "phone"
+    db.add(NetObject(nas_id=nid, kind="nvr", name="NVR یزد", addresses="192.168.50.200", sensitive=True,
+                     sensitive_action="block", allowed_from="192.168.50.15"))
+    db.add(NetObject(nas_id=nid, kind="server", name="اتوماسیون", addresses="192.168.50.5", users_allowed=True))
+    db.add(SiteRule(pattern="instagram.com", action="block"))
+    db.add(AccessExempt(kind="ip", value="192.168.50.40"))
+    set_setting(db, "acl_internal_restrict", "1")
+    set_setting(db, "public_url", "http://192.168.88.10:9090")
+    db.commit()
+    fake = FakeRouter()
+    fake.store["ip/firewall/filter"] = [{".id": "*A", "chain": "forward", "action": "fasttrack-connection"}]
+    monkeypatch.setattr(routeros, "api", fake.conn)
+    access.invalidate()
+    plan = access.desired(db, nas)
+    assert plan["lists"]["macc-block"] == ["instagram.com"] and "192.168.50.5" in plan["lists"]["macc-int-ok"]
+    assert "192.168.50.40" in plan["lists"][access.FREE] and "192.168.50.12" in plan["lists"][access.FREE]
+    assert {"mac-address": "AA:00:00:00:00:02", "type": "bypassed", "comment": "macc exempt"} in plan["bindings"]
+    assert "/ip firewall filter add" in access.script(plan)
+    print(access.apply(db, nas))
+    rules = fake.store["ip/firewall/filter"]
+    assert rules[-1][".id"] == "*A" and all(r["comment"].startswith("macc") for r in rules[:-1])
+    n_rules = len(rules) - 1
+    assert any(r.get("action") == "drop" and r.get("dst-address-list") == f"macc-s{plan_obj}" for r in rules
+               for plan_obj in [db.query(NetObject).filter(NetObject.name == "NVR یزد").one().id])
+    assert fake.store["ip/firewall/nat"][0]["to-addresses"] == "192.168.88.10"
+    assert {i["address"] for i in fake.store["ip/firewall/address-list"] if i["list"] == "macc-block"} == {"instagram.com"}
+    # applying again changes nothing twice; removing leaves the router's own rule
+    access.apply(db, nas)
+    assert len([r for r in fake.store["ip/firewall/filter"] if r.get("comment", "").startswith("macc")]) == n_rules
+    access.apply(db, nas, remove_only=True)
+    assert [r[".id"] for r in fake.store["ip/firewall/filter"]] == ["*A"]
+    assert not [i for i in fake.store["ip/firewall/address-list"] if i["list"].startswith("macc-")]
+    # router caught an access to the NVR
+    oid = db.query(NetObject).filter(NetObject.name == "NVR یزد").one().id
+    access.violations(db, nas, [{"list": f"macc-v{oid}", "address": "192.168.50.77"}])
+    db.commit()
+    assert db.query(Alert).filter(Alert.title.like("دسترسی غیرمجاز به NVR یزد از 192.168.50.77%")).count() == 1
+    access.violations(db, nas, [{"list": f"macc-v{oid}", "address": "192.168.50.77"}])
+    db.commit()
+    assert db.query(Alert).filter(Alert.title.like("دسترسی غیرمجاز به NVR یزد%")).count() == 1
+    # NetFlow sees it too (allowed source: no alarm)
+    access.flow_alarm(SessionLocal, nid, "192.168.50.15", {"id": oid, "name": "NVR یزد", "allowed_from": "192.168.50.15"}, now())
+    access.flow_alarm(SessionLocal, nid, "192.168.50.16", {"id": oid, "name": "NVR یزد", "allowed_from": "192.168.50.15"}, now())
+    assert db.query(Alert).filter(Alert.title == "دسترسی غیرمجاز به NVR یزد از 192.168.50.16").count() == 1
+    db.close()
+    with TestClient(app) as c:
+        r = c.get("/", headers={"host": "www.instagram.com"})
+        assert r.status_code == 403 and "مسدود" in r.text and "www.instagram.com" in r.text
+        _login(c, "admin", "Secret12345")
+        r = c.get("/access")
+        assert r.status_code == 200 and "instagram.com" in r.text and "NVR یزد" in r.text
+        assert c.get(f"/access/preview/{nid}").status_code == 200
+        c.post("/access/sites/add", data={"patterns": "https://www.YouTube.com/watch\nbad..x", "action": "block"})
+        c.post("/access/exempt/add", data={"values": "aa-bb-cc-dd-ee-ff 192.168.50.41"})
+        assert c.get("/winlogons?q=nobody").status_code == 200
+        r = c.get("/messages")
+        assert r.status_code == 200 and "AllowRemoteRPC" in r.text
+        c.post("/messages/send", data={"mode": "all", "text": "سلام"})
+        r = c.get("/devices")
+        assert r.status_code == 200 and "پینگ" in r.text
+        r = c.get("/mgmt")
+        assert r.status_code == 200
+    db = SessionLocal()
+    assert db.query(SiteRule).filter(SiteRule.pattern == "youtube.com").count() == 1
+    assert db.query(AccessExempt).filter(AccessExempt.value.in_(["AA:BB:CC:DD:EE:FF", "192.168.50.41"])).count() == 2
+    for m in (SiteRule, AccessExempt):
+        db.query(m).delete()
+    db.query(NetObject).filter(NetObject.nas_id == nid).delete()
+    db.query(IfaceDaily).filter(IfaceDaily.nas_id == nid).delete()
+    set_setting(db, "acl_internal_restrict", "0")
+    db.delete(db.get(Nas, nid))
+    db.commit()
+    db.close()
+    pingcheck.DEAD.clear()
+    access.invalidate()

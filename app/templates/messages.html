@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>پیام به رایانه‌ها</h2></div>
+{% if not available %}<div class="flash warn">ارسال پیام فقط وقتی برنامه روی سرور ویندوز اجرا می‌شود کار می‌کند (msg.exe).</div>{% endif %}
+<div class="card"><form method="post" action="/messages/send">
+<div class="grid g3">
+  <div class="fg"><label>گیرنده</label><select name="mode" onchange="document.querySelectorAll('[data-m]').forEach(e=>e.style.display=e.dataset.m==this.value?'':'none')">
+    <option value="user">یک کاربر (رایانه‌هایی که الان با آن وارد شده)</option><option value="router">همهٔ رایانه‌های روشن یک دفتر</option><option value="all">همهٔ رایانه‌های روشن</option><option value="device">یک رایانه (MAC)</option></select></div>
+  <div class="fg" data-m="user"><label>نام کاربری AD</label><input name="user" class="ltr" placeholder="m.karimi"></div>
+  <div class="fg" data-m="router" style="display:none"><label>دفتر / روتر</label><select name="nas_id">{% for n in routers %}<option value="{{ n.id }}">{{ n.name }}</option>{% endfor %}</select></div>
+  <div class="fg" data-m="device" style="display:none"><label>MAC رایانه</label><input name="mac" class="ltr"></div>
+  <div class="fg"><label>مدت نمایش (ثانیه)</label><input name="seconds" class="ltr" value="300"></div>
+</div>
+<div class="fg"><label>متن پیام</label><textarea name="text" rows="4" required></textarea></div>
+<button class="btn p">ارسال</button>
+</form>
+<p class="hint">پیام با msg.exe از سرور برنامه به IP رایانه فرستاده می‌شود و روی صفحهٔ کاربر باز می‌شود. رایانه‌ها باید اجازه بدهند (یک بار با GPO):
+رجیستری <span class="ltr">HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server</span> مقدار DWORD <span class="ltr">AllowRemoteRPC = 1</span>،
+و در فایروال ویندوز قانون «File and Printer Sharing (SMB-In)» برای IP سرور برنامه باز باشد. برای پیام هنگام ورود به ویندوز از صفحهٔ «دستگاه‌ها» استفاده کنید.</p></div>
+{% if result %}<div class="card tbl"><h3>نتیجهٔ آخرین ارسال</h3><table><tr><th>رایانه</th><th>IP</th><th>نتیجه</th></tr>
+{% for label, ip, ok, err in result %}<tr><td>{{ label }}</td><td class="ltr">{{ ip }}</td><td>{% if ok %}<span class="badge ok">رسید</span>{% else %}<span class="badge err">ناموفق</span> <span class="hint ltr">{{ err }}</span>{% endif %}</td></tr>{% endfor %}</table></div>{% endif %}
+<div class="card tbl"><h3>پیام‌های اخیر</h3><table><tr><th>زمان</th><th>فرستنده</th><th>شرح</th></tr>
+{% for a in sent %}<tr><td>{{ a.ts|jdt }}</td><td>{{ a.username }}</td><td class="wrap">{{ a.detail }}</td></tr>{% else %}<tr><td colspan="3" class="muted">پیامی فرستاده نشده</td></tr>{% endfor %}</table></div>
+{% endblock %}

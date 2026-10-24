@@ -159,6 +159,10 @@ class Nas(Base):
     tunnel_ranges = Column(Text, default="")              # other offices' networks reached through a tunnel / IPsec
     monitor_targets = Column(String(300), default="")    # addresses the router pings (HQ server through the tunnel)
     auto_tunnels = Column(String(300), default="")       # tunnel-type interfaces seen on the router (when none chosen)
+    iface_facts = Column(Text, default="")                # wancheck.learn(): default route, PPPoE/VLAN parents, bridges
+    acl_enabled = Column(Boolean, default=False)          # access rules (access.py) are kept on this router
+    acl_status = Column(String(300), default="")          # result of the last apply
+    acl_applied_at = Column(DateTime, nullable=True)
 
 
 class Device(Base):
@@ -182,6 +186,8 @@ class Device(Base):
     logon_user = Column(String(150), default="")          # last Windows logon on this computer
     logon_at = Column(DateTime, nullable=True)
     logon_source = Column(String(20), default="")         # dc|script
+    ping_ok = Column(Boolean, nullable=True)              # last ping check by the router (pingcheck)
+    ping_at = Column(DateTime, nullable=True)
 
 
 class NightList(Base):
@@ -512,6 +518,33 @@ class NetObject(Base):
     reach_external = Column(Boolean, default=False)          # reachable from the internet
     reach_tunnel = Column(Boolean, default=True)              # reachable from the other offices through the tunnel
     note = Column(String(500), default="")
+    created_at = Column(DateTime, default=now)
+    sensitive = Column(Boolean, default=False)                # access from outside allowed_from raises an alarm
+    sensitive_action = Column(String(10), default="alarm")    # alarm | block (the router drops it too)
+    allowed_from = Column(Text, default="")                   # who may reach a sensitive object (IP / CIDR / range)
+    users_allowed = Column(Boolean, default=True)             # logged-in hotspot users may reach it (internal limits)
+
+
+class SiteRule(Base):
+    """A site / address users may not open (block) or, in allow-list mode, the only ones they may (allow)."""
+    __tablename__ = "site_rules"
+    id = Column(Integer, primary_key=True)
+    pattern = Column(String(255), nullable=False)             # domain (example.com covers its subdomains) or IP / CIDR
+    action = Column(String(10), default="block")              # block | allow
+    note = Column(String(255), default="")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=now)
+    created_by = Column(String(100), default="")
+
+
+class AccessExempt(Base):
+    """A device that needs no hotspot login and is not limited (printer, camera, IP phone ...): MAC or IP."""
+    __tablename__ = "access_exempt"
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(4), nullable=False)                  # mac | ip
+    value = Column(String(64), nullable=False)
+    nas_id = Column(Integer, nullable=True)                   # only on this router (None = all)
+    note = Column(String(255), default="")
     created_at = Column(DateTime, default=now)
 
 

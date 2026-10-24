@@ -34,6 +34,9 @@
   {% if 'pbx_manage' in perms %}<a href="/pbx" data-tour="pbx" class="{{ 'on' if p.startswith('/pbx') }}">سرورهای ایزابل</a>{% endif %}
   {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>
   <a href="/netobjects" class="{{ 'on' if p.startswith('/netobjects') }}">سرورها و دستگاه‌های شبکه</a>{% endif %}
+  {% if 'devices_view' in perms %}<a href="/winlogons" class="{{ 'on' if p.startswith('/winlogons') }}">ورود کاربران ویندوز</a>{% endif %}
+  {% if 'ad_message' in perms %}<a href="/messages" class="{{ 'on' if p.startswith('/messages') }}">پیام به رایانه‌ها</a>{% endif %}
+  {% if 'access_manage' in perms %}<a href="/access" class="{{ 'on' if p.startswith('/access') }}">کنترل دسترسی و سایت‌ها</a>{% endif %}
   {% if 'router_admin' in perms %}<a href="/routeros" class="{{ 'on' if p.startswith('/routeros') }}">نسخه و بروزرسانی روترها</a>{% endif %}
   {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') }}">Active Directory</a>{% endif %}
   {% if 'panel_users' in perms %}<a href="/admins" data-tour="admins" class="{{ 'on' if p.startswith('/admins') }}">کاربران پنل</a>{% endif %}

@@ -1,1 +1,1 @@
-VERSION = "1.15.0"     # 2026-10-23: history retention (6 months) and purge, RouterOS version / update / reboot / npk upload
+VERSION = "1.16.0"     # 2026-10-24: WAN check, ping-verified online, access control on routers, Windows logons and messages

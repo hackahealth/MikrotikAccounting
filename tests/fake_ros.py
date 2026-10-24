@@ -37,12 +37,17 @@ class FakePath:
         return iter([{k: ros_value(v) for k, v in i.items()} for i in self.items])
 
     def add(self, **kw):
-        if any(i.get("name") == kw.get("name") for i in self.items):
+        if kw.get("name") is not None and any(i.get("name") == kw.get("name") for i in self.items):
             raise RuntimeError("failure: already have such name")
         self.router.seq += 1
         item = {".id": f"*{self.router.seq:X}", "disabled": False}
+        before = kw.pop("place-before", None)
         item.update(kw)
-        self.items.append(item)
+        pos = next((n for n, i in enumerate(self.items) if i[".id"] == before), None)
+        if pos is None:
+            self.items.append(item)
+        else:
+            self.items.insert(pos, item)
         return item[".id"]
 
     def update(self, **kw):

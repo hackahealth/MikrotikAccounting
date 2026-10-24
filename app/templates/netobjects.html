@@ -13,17 +13,24 @@
     <label><input type="checkbox" name="reach_external" value="1" {{ 'checked' if edit and edit.reach_external }}> از اینترنت قابل دسترس است</label><br>
     <label><input type="checkbox" name="reach_tunnel" value="1" {{ 'checked' if not edit or edit.reach_tunnel }}> از دفاتر دیگر (تانل) قابل دسترس است</label></div>
   <div class="fg"><label>توضیح</label><input name="note" value="{{ edit.note if edit else '' }}"></div>
+  <div class="fg"><label>کاربران هات‌اسپات</label>
+    <label><input type="checkbox" name="users_allowed" value="1" {{ 'checked' if not edit or edit.users_allowed }}> کاربران بعد از ورود به آن دسترسی دارند (مقصد مجاز)</label></div>
+  <div class="fg"><label>آدرس حساس</label>
+    <label><input type="checkbox" name="sensitive" value="1" {{ 'checked' if edit and edit.sensitive }}> حساس است: دسترسی غیرمجاز الارم بدهد</label><br>
+    <select name="sensitive_action"><option value="alarm">فقط الارم</option><option value="block" {{ 'selected' if edit and edit.sensitive_action == 'block' }}>الارم و مسدود</option></select></div>
+  <div class="fg"><label>مبدأهای مجاز برای آدرس حساس (IP، رنج یا CIDR)</label><textarea name="allowed_from" class="ltr" rows="3" placeholder="192.168.88.15   # کامپیوتر نگهبانی">{{ edit.allowed_from if edit else '' }}</textarea></div>
 </div>
 <button class="btn p">ذخیره</button>{% if edit %} <a class="btn" href="/netobjects">انصراف</a>{% endif %}
 </form>
 <p class="hint">دوربین یا تلفنی که نوعش در صفحهٔ «دستگاه‌ها» تعیین شده باشد، بدون تعریف اینجا هم در جمع دوربین‌ها و تلفن‌ها حساب می‌شود. تعریف اینجا برای وقتی است که بخواهید آن را با نام و جدا ببینید، یا یک رنج کامل را یکجا تعریف کنید.</p></div>
 <div class="card tbl"><table>
-<tr><th>نام</th><th>نوع</th><th>دفتر</th><th>آدرس‌ها</th><th>از اینترنت</th><th>از تانل</th><th>توضیح</th><th></th></tr>
+<tr><th>نام</th><th>نوع</th><th>دفتر</th><th>آدرس‌ها</th><th>از اینترنت</th><th>از تانل</th><th>کاربران</th><th>حساس</th><th>توضیح</th><th></th></tr>
 {% for o in items %}<tr><td>{{ o.name }}</td><td>{{ kind_fa.get(o.kind, o.kind) }}</td><td>{{ nas_names.get(o.nas_id, 'همه دفاتر') if o.nas_id else 'همه دفاتر' }}</td>
 <td class="ltr wrap">{{ o.addresses|replace('\n', '، ') }}</td>
-<td>{% if o.reach_external %}<span class="badge warn">بله</span>{% else %}خیر{% endif %}</td><td>{{ 'بله' if o.reach_tunnel else 'خیر' }}</td><td class="wrap">{{ o.note }}</td>
+<td>{% if o.reach_external %}<span class="badge warn">بله</span>{% else %}خیر{% endif %}</td><td>{{ 'بله' if o.reach_tunnel else 'خیر' }}</td><td>{{ 'مجاز' if o.users_allowed else '-' }}</td>
+<td>{% if o.sensitive %}<span class="badge err">{{ 'مسدود + الارم' if o.sensitive_action == 'block' else 'الارم' }}</span>{% if o.allowed_from %}<div class="hint ltr">{{ o.allowed_from|replace('\n', '، ') }}</div>{% endif %}{% else %}-{% endif %}</td><td class="wrap">{{ o.note }}</td>
 <td style="white-space:nowrap"><a class="btn s" href="/netobjects?edit={{ o.id }}">ویرایش</a>
 <form class="inline" method="post" action="/netobjects/{{ o.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>
-{% else %}<tr><td colspan="8" class="muted">هنوز چیزی تعریف نشده</td></tr>{% endfor %}
+{% else %}<tr><td colspan="10" class="muted">هنوز چیزی تعریف نشده</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

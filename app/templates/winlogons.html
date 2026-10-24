@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>ورود کاربران ویندوز</h2></div>
+<p class="hint">ورود کاربران AD به رایانه‌ها، از رویدادهای ورود دامین کنترلرها و اسکریپت ورود (GPO). جستجو با نام کاربر، نام یا IP یا MAC رایانه.</p>
+<div class="card"><form class="filters" method="get">
+  <div><label>کاربر یا رایانه</label><input name="q" value="{{ q }}" placeholder="m.karimi یا ACC-PC04"></div>
+  <div><label>از (شمسی)</label><input name="frm" class="ltr" value="{{ frm }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ to }}"></div>
+  <div><button class="btn p">نمایش</button></div></form></div>
+<div class="card tbl"><table>
+<tr><th>کاربر</th><th>رایانه</th><th>IP</th><th>دفتر / روتر</th><th>از</th><th>تا</th><th>منبع</th></tr>
+{% for r in rows %}{% set d = devs.get(r.mac) %}{% set ip = ips.get(r.id) %}
+<tr><td><a href="?q={{ r.value|urlencode }}&frm={{ frm }}&to={{ to }}">{{ r.value }}</a></td>
+<td>{% if d %}<a href="/devices/{{ d.mac }}">{{ d.label or d.hostname or d.mac }}</a>{% else %}<span class="ltr">{{ r.mac }}</span>{% endif %}<div class="hint ltr">{{ r.mac }}</div></td>
+<td class="ltr">{{ ip[0] if ip else '' }}</td><td>{{ nas_names.get(ip[1], '-') if ip and ip[1] else '-' }}</td>
+<td>{{ r.first_seen|jdt }}</td><td>{{ r.last_seen|jdt }}</td><td class="hint">{{ 'دامین کنترلر' if r.source == 'dc' else 'اسکریپت ورود' }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">موردی پیدا نشد</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

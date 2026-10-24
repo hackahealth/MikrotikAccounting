@@ -5,7 +5,7 @@
 <tr><th>کاربر</th><th>سرویس</th><th>IP</th><th>MAC / مبدأ</th><th>دستگاه</th><th>شروع</th><th>مدت</th><th>سرعت دانلود</th><th>سرعت آپلود</th><th>مصرف این اتصال</th><th>روتر</th><th></th></tr>
 {% for r in rows %}{% set s = r.s %}
 <tr data-id="{{ s.id }}"><td><a href="/reports?preset=today&user_id={{ s.user_id }}">{{ s.username }}</a></td>
-<td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ s.framed_ip }}</td><td class="ltr">{{ s.mac }}</td>
+<td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ s.framed_ip }}</td><td class="ltr">{{ s.mac }}{% if r.dead %} <span class="badge warn" title="دستگاه به پینگ روتر جواب نداد؛ احتمالاً خاموش است ولی اتصال هات‌اسپاتش باز مانده">بدون پاسخ پینگ</span>{% endif %}</td>
 <td>{{ s.device_type|devtype }} <span class="hint">{{ s.device_os }}</span></td><td>{{ s.start_time|jdt }}</td>
 <td class="dur">{{ r.duration|duration }}</td>
 <td class="ltr down">{{ r.down|rate if r.down is not none else '-' }}</td><td class="ltr up">{{ r.up|rate if r.up is not none else '-' }}</td>

@@ -31,7 +31,8 @@ def take(db, ts=None):
     day = ts.date()
     db.query(NightList).filter(NightList.day == day).delete()
     n = 0
-    for d in db.query(Device).filter(Device.last_seen >= online_after(ts)).all():
+    from .pingcheck import online_filter
+    for d in online_filter(db.query(Device), ts).all():
         hs = db.query(DeviceHistory).filter(DeviceHistory.mac == d.mac, DeviceHistory.kind == "user",
                                             DeviceHistory.source.notin_(LOGON_SOURCES)) \
             .order_by(DeviceHistory.last_seen.desc()).first()

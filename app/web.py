@@ -5,7 +5,9 @@ import hmac
 import io
 import json
 import logging
+from html import escape as html_escape
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -20,9 +22,9 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
-               jobs, ldap_ad, mgmt, netobjects, netscope, policy, reports, retention, rosadmin, routeros, scope, security, tour, xlsx)
-from .db import (LDAP_KEYS, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
+from . import (access, alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+               jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
+from .db import (LDAP_KEYS, AccessExempt, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
@@ -79,6 +81,16 @@ templates.env.globals.update({"CATEGORIES": classifier.CATEGORIES, "ROLES": auth
                               "DEVICE_TYPES": devices.TYPES})
 
 
+BLOCK_PAGE = """<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>دسترسی مسدود است</title>
+<style>body{font:16px Tahoma,sans-serif;background:#f3f4f6;color:#111;display:flex;align-items:center;justify-content:center;
+min-height:100vh;margin:0}div{background:#fff;border-radius:12px;padding:32px 28px;max-width:440px;text-align:center;
+box-shadow:0 4px 24px rgba(0,0,0,.08)}h1{font-size:20px;color:#b91c1c;margin:0 0 12px}p{color:#4b5563;line-height:1.9}
+b{direction:ltr;display:inline-block}</style></head><body><div><h1>دسترسی به این سایت مسدود است</h1>
+<p>باز کردن <b>{host}</b> طبق سیاست استفاده از اینترنت سازمان مجاز نیست.</p>
+<p>اگر برای کارتان لازم است با واحد IT تماس بگیرید.</p></div></body></html>"""
+
+
 # ------------------------------------------------------------------ helpers / auth
 PUBLIC = ("/login", "/static", "/ua", "/healthz", "/my", "/logon", "/hs/")
 
@@ -95,6 +107,9 @@ async def auth_mw(request: Request, call_next):
 
 async def _auth(request, call_next):
     path = request.url.path
+    host = request.headers.get("host", "")
+    if host and access.is_blocked_host(SessionLocal(), host):     # a blocked site sent here by the router
+        return HTMLResponse(BLOCK_PAGE.replace("{host}", html_escape(host.split(":")[0])), status_code=403)
     if path.startswith(PUBLIC):
         return await call_next(request)
     db = SessionLocal()
@@ -1337,7 +1352,8 @@ def _live_rows(db, me):
         q = q.filter(AcctSession.user_id.in_(ids))
     for s in q.order_by(AcctSession.start_time.desc()).all():
         up, down = jobs.live["rates"].get(s.framed_ip, (None, None))
-        rows.append({"s": s, "up": up, "down": down, "duration": int((now() - s.start_time).total_seconds())})
+        rows.append({"s": s, "up": up, "down": down, "duration": int((now() - s.start_time).total_seconds()),
+                     "dead": pingcheck.is_dead(devices.normalize_mac(s.mac or ""))})
     return rows
 
 
@@ -1977,7 +1993,8 @@ def _nas_names(db):
 def _device_state(d, ts, stale):
     if d.last_seen is None:
         return "stale"
-    if ts - d.last_seen <= timedelta(seconds=config.ROUTER_POLL_EVERY * 3 + 60):
+    if ts - d.last_seen <= timedelta(seconds=config.ROUTER_POLL_EVERY * 3 + 60) \
+            and not (d.ping_ok is False and d.ping_at and d.ping_at >= d.last_seen):
         return "online"
     return "active" if ts - d.last_seen <= stale else "stale"
 
@@ -1988,7 +2005,6 @@ def devices_page(request: Request, q: str = "", status: str = "", nas: str = "",
     db = SessionLocal()
     ts = now()
     stale = timedelta(days=devices.stale_days(db))
-    online_after = ts - timedelta(seconds=config.ROUTER_POLL_EVERY * 3 + 60)
     at_dt = _parse_dt(at)
     qry = db.query(Device)
     hist = []
@@ -2010,7 +2026,7 @@ def devices_page(request: Request, q: str = "", status: str = "", nas: str = "",
     elif at_dt:
         qry = qry.filter(Device.mac.in_({h.mac for h in hist}))
     if status == "online":
-        qry = qry.filter(Device.last_seen >= online_after)
+        qry = pingcheck.online_filter(qry, ts)
     elif status == "active":
         qry = qry.filter(Device.last_seen >= ts - stale)
     elif status == "stale":
@@ -2026,13 +2042,14 @@ def devices_page(request: Request, q: str = "", status: str = "", nas: str = "",
     page = max(1, page)
     items = qry.order_by(Device.last_seen.desc()).offset((page - 1) * per).limit(per).all()
     counts = {"all": db.query(Device).count(),
-              "online": db.query(Device).filter(Device.last_seen >= online_after).count(),
+              "online": pingcheck.online_filter(db.query(Device), ts).count(),
               "stale": db.query(Device).filter((Device.last_seen < ts - stale) | Device.last_seen.is_(None)).count()}
     return render(request, "devices.html", items=items, hist=hist, q=q, status=status, nas=nas, at=at,
                   at_dt=at_dt, page=page, pages=max(1, (total + per - 1) // per), total=total, counts=counts,
                   nas_names=_nas_names(db), routers=db.query(Nas).order_by(Nas.name).all(),
                   state={d.id: _device_state(d, ts, stale) for d in items}, now=ts, gap=devices.HISTORY_GAP,
-                  stale_days=devices.stale_days(db), qs=str(request.query_params), type=type,
+                  stale_days=devices.stale_days(db), qs=str(request.query_params), type=type, ping=pingcheck.state,
+                  ping_minutes=pingcheck.minutes(db), ping_kick=get_setting(db, "ping_kick", "0") == "1",
                   lg=logons.settings(db), lg_hint=logons.hint(get_setting(db, "logon_error")),
                   lm=logons.message_settings(db), logon_quota_modes=logons.QUOTA_MODES, warn_pct=policy.warn_pct(db),
                   night_time="%02d:%02d" % nightlist.check_time(db))
@@ -2207,10 +2224,13 @@ async def device_settings(request: Request):
     form = await request.form()
     db = SessionLocal()
     v = str(form.get("device_stale_days", "")).strip().translate(FA_TO_EN)
-    if not v.isdigit() or int(v) < 1:
-        flash(request, "تعداد روز نادرست است", "err")
+    pm = str(form.get("ping_verify_minutes", pingcheck.minutes(db))).strip().translate(FA_TO_EN)
+    if not v.isdigit() or int(v) < 1 or not pm.isdigit():
+        flash(request, "تعداد روز / دقیقه نادرست است", "err")
         return redirect("/devices")
     set_setting(db, "device_stale_days", v)
+    set_setting(db, "ping_verify_minutes", str(min(int(pm), 1440)))
+    set_setting(db, "ping_kick", "1" if _bool(form, "ping_kick") else "0")
     db.commit()
     log_action(request, "تغییر مدت راکد شدن دستگاه", f"{v} روز")
     flash(request, f"دستگاهی که {v} روز دیده نشود «راکد» نمایش داده می‌شود (سابقه آن پاک نمی‌شود)")
@@ -3147,6 +3167,11 @@ async def netobjects_save(request: Request):
     o.reach_external = _bool(form, "reach_external")
     o.reach_tunnel = _bool(form, "reach_tunnel")
     o.note = str(form.get("note", "")).strip()[:500]
+    o.users_allowed = _bool(form, "users_allowed")
+    o.sensitive = _bool(form, "sensitive")
+    o.sensitive_action = "block" if form.get("sensitive_action") == "block" else "alarm"
+    o.allowed_from = str(form.get("allowed_from", "")).strip()[:2000]
+    bad += netscope.parse_ranges(o.allowed_from)[1]
     if not o.name or not nets or bad:
         flash(request, "نام و دست‌کم یک آدرس درست لازم است" + (f" (نادرست: {' '.join(bad)})" if bad else ""), "err")
         return redirect(f"/netobjects?edit={oid}" if oid else "/netobjects")
@@ -3372,3 +3397,225 @@ async def routeros_delete_npk(request: Request):
     except ValueError as e:
         flash(request, str(e), "err")
     return redirect("/routeros")
+
+
+# ------------------------------------------------------------------ access control (sites, internal destinations, exempt)
+@app.get("/access", response_class=HTMLResponse)
+def access_page(request: Request):
+    db = SessionLocal()
+    routers = db.query(Nas).filter(Nas.api_user != "").order_by(Nas.name).all()
+    viol = db.query(Alert).filter(Alert.kind == "access").order_by(Alert.ts.desc()).limit(50).all()
+    return render(request, "access.html", st=access.settings(db), routers=routers,
+                  rules=db.query(SiteRule).order_by(SiteRule.action, SiteRule.pattern).all(),
+                  exempts=db.query(AccessExempt).order_by(AccessExempt.kind, AccessExempt.value).all(),
+                  sensitive=db.query(NetObject).filter(NetObject.sensitive.is_(True)).all(),
+                  users_ok=db.query(NetObject).filter(NetObject.users_allowed.is_(True),
+                                                      NetObject.sensitive.isnot(True)).all(),
+                  nas_names=_nas_names(db), types=devices.TYPES, viol=viol,
+                  internal=get_setting(db, "internal_ranges", access.DEFAULT_INTERNAL))
+
+
+@app.post("/access/settings")
+async def access_settings(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    allowed = str(form.get("allowed_internal", "")).strip()
+    bad = netscope.parse_ranges(allowed)[1]
+    if bad:
+        flash(request, "آدرس نادرست: " + " ".join(bad), "err")
+        return redirect("/access")
+    set_setting(db, "acl_sites_mode", "allow" if form.get("sites_mode") == "allow" else "block")
+    set_setting(db, "acl_internal_restrict", "1" if _bool(form, "internal_restrict") else "0")
+    set_setting(db, "acl_allowed_internal", allowed)
+    set_setting(db, "acl_exempt_types", ",".join(t for t in form.getlist("exempt_types") if t in dict(devices.TYPES)))
+    set_setting(db, "acl_block_page", "1" if _bool(form, "block_page") else "0")
+    db.commit()
+    access.invalidate()
+    log_action(request, "تنظیمات کنترل دسترسی", f"سایت‌ها: {form.get('sites_mode')}، محدودیت داخلی: {_bool(form, 'internal_restrict')}")
+    flash(request, "ذخیره شد؛ روی روترهای فعال در دقیقهٔ بعد اعمال می‌شود")
+    return redirect("/access")
+
+
+@app.post("/access/sites/add")
+async def access_sites_add(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    action = "allow" if form.get("action") == "allow" else "block"
+    added, bad = [], []
+    for t in re.split(r"[\s,;]+", str(form.get("patterns", ""))):
+        if not t:
+            continue
+        p = access.clean_pattern(t)
+        if not p:
+            bad.append(t)
+            continue
+        if db.query(SiteRule).filter(SiteRule.pattern == p, SiteRule.action == action).first() is None:
+            db.add(SiteRule(pattern=p, action=action, note=str(form.get("note", "")).strip()[:255],
+                            created_by=request.state.me.username))
+            added.append(p)
+    db.commit()
+    access.invalidate()
+    if added:
+        log_action(request, "مسدودی سایت" if action == "block" else "سایت مجاز", "، ".join(added)[:500])
+    flash(request, (f"{len(added)} مورد اضافه شد" if added else "موردی اضافه نشد")
+          + (f"؛ نادرست: {' '.join(bad)}" if bad else ""), "err" if bad and not added else "ok")
+    return redirect("/access#sites")
+
+
+@app.post("/access/sites/{rid}/{op}")
+def access_sites_op(request: Request, rid: int, op: str):
+    db = SessionLocal()
+    r = db.get(SiteRule, rid)
+    if r is not None:
+        if op == "delete":
+            db.delete(r)
+        elif op == "toggle":
+            r.enabled = not r.enabled
+        db.commit()
+        access.invalidate()
+        log_action(request, "سایت: " + ("حذف" if op == "delete" else "تغییر وضعیت"), r.pattern)
+    return redirect("/access#sites")
+
+
+@app.post("/access/exempt/add")
+async def access_exempt_add(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    added, bad = [], []
+    nid = _int(form.get("nas_id"))
+    for t in re.split(r"[\s,;]+", str(form.get("values", ""))):
+        if not t:
+            continue
+        m = devices.normalize_mac(t)
+        if m:
+            kind, val = "mac", m
+        elif access._is_addr(t):
+            kind, val = "ip", t
+        else:
+            bad.append(t)
+            continue
+        if db.query(AccessExempt).filter(AccessExempt.kind == kind, AccessExempt.value == val).first() is None:
+            db.add(AccessExempt(kind=kind, value=val, nas_id=nid, note=str(form.get("note", "")).strip()[:255]))
+            added.append(val)
+    db.commit()
+    access.invalidate()
+    if added:
+        log_action(request, "استثنای دسترسی", "، ".join(added)[:500])
+    flash(request, (f"{len(added)} استثنا اضافه شد" if added else "موردی اضافه نشد")
+          + (f"؛ نادرست: {' '.join(bad)}" if bad else ""), "err" if bad and not added else "ok")
+    return redirect("/access#exempt")
+
+
+@app.post("/access/exempt/{eid}/delete")
+def access_exempt_delete(request: Request, eid: int):
+    db = SessionLocal()
+    e = db.get(AccessExempt, eid)
+    if e is not None:
+        db.delete(e)
+        db.commit()
+        access.invalidate()
+        log_action(request, "حذف استثنای دسترسی", e.value)
+    return redirect("/access#exempt")
+
+
+@app.get("/access/preview/{nid}", response_class=HTMLResponse)
+def access_preview(request: Request, nid: int):
+    db = SessionLocal()
+    n = db.get(Nas, nid)
+    if n is None:
+        return redirect("/access")
+    return render(request, "access_preview.html", n=n, script=access.script(access.desired(db, n)))
+
+
+@app.post("/access/router/{nid}")
+async def access_router(request: Request, nid: int):
+    form = await request.form()
+    db = SessionLocal()
+    n = db.get(Nas, nid)
+    op = str(form.get("op", ""))
+    if n is None or op not in ("enable", "disable", "apply"):
+        return redirect("/access")
+    try:
+        if op == "disable":
+            n.acl_status = "حذف شد: " + access.apply(db, n, remove_only=True)
+            n.acl_enabled = False
+        else:
+            if op == "enable" and form.get("confirm") != "1":
+                flash(request, "تأیید فعال‌سازی را علامت بزنید", "err")
+                return redirect("/access")
+            n.acl_enabled = True
+            n.acl_status = access.apply(db, n)
+        n.acl_applied_at = now()
+        access.forget(n.id)
+        db.commit()
+        log_action(request, "کنترل دسترسی روتر", f"{n.name}: {op} — {n.acl_status}")
+        flash(request, f"{n.name}: {n.acl_status}")
+    except Exception as e:
+        db.rollback()
+        flash(request, f"{n.name}: خطا {e}", "err")
+    return redirect("/access")
+
+
+# ------------------------------------------------------------------ Windows: who logged on where, messages
+@app.get("/winlogons", response_class=HTMLResponse)
+def winlogons_page(request: Request, q: str = "", frm: str = "", to: str = ""):
+    db = SessionLocal()
+    d1, d2 = _date(frm), _date(to)
+    today = now().date()
+    d2 = d2 or today
+    d1 = d1 or (d2 - timedelta(days=7))
+    start, end = datetime.combine(d1, datetime.min.time()), datetime.combine(d2 + timedelta(days=1), datetime.min.time())
+    hq = db.query(DeviceHistory).filter(DeviceHistory.kind == "user", DeviceHistory.source.in_(nightlist.LOGON_SOURCES),
+                                        DeviceHistory.last_seen >= start, DeviceHistory.first_seen < end)
+    q = q.strip()
+    devs = {}
+    if q:
+        macs = {d.mac for d in db.query(Device).filter(Device.hostname.ilike(f"%{q}%") | Device.label.ilike(f"%{q}%")
+                                                       | Device.last_ip.ilike(f"%{q}%") | Device.mac.ilike(f"%{q}%"))}
+        cond = DeviceHistory.value.ilike(f"%{q}%")
+        hq = hq.filter(cond | DeviceHistory.mac.in_(macs)) if macs else hq.filter(cond)
+    rows = hq.order_by(DeviceHistory.first_seen.desc()).limit(1000).all()
+    if rows:
+        devs = {d.mac: d for d in db.query(Device).filter(Device.mac.in_({r.mac for r in rows}))}
+    ips = {}
+    for r in rows:      # the computer's IP at that logon
+        h = db.query(DeviceHistory).filter(DeviceHistory.mac == r.mac, DeviceHistory.kind == "ip",
+                                           DeviceHistory.first_seen <= r.last_seen,
+                                           DeviceHistory.last_seen >= r.first_seen).order_by(DeviceHistory.last_seen.desc()).first()
+        ips[r.id] = (h.value, h.nas_id) if h else ((devs[r.mac].last_ip, devs[r.mac].last_nas_id) if r.mac in devs else ("", None))
+    return render(request, "winlogons.html", rows=rows, devs=devs, ips=ips, q=q, frm=jalali.to_jalali_str(d1),
+                  to=jalali.to_jalali_str(d2), nas_names=_nas_names(db))
+
+
+@app.get("/messages", response_class=HTMLResponse)
+def messages_page(request: Request):
+    db = SessionLocal()
+    sent = db.query(AuditLog).filter(AuditLog.action == "پیام به رایانه‌ها").order_by(AuditLog.ts.desc()).limit(30).all()
+    return render(request, "messages.html", routers=db.query(Nas).order_by(Nas.name).all(), sent=sent,
+                  available=winmsg.available(), result=request.session.pop("msg_result", None))
+
+
+@app.post("/messages/send")
+async def messages_send(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    mode = str(form.get("mode", ""))
+    value = str(form.get({"user": "user", "router": "nas_id", "device": "mac"}.get(mode, "x"), "")).strip()
+    text = str(form.get("text", "")).strip()[:1000]
+    if mode not in ("user", "router", "all", "device") or not text or (mode in ("user", "router", "device") and not value):
+        flash(request, "گیرنده و متن پیام را وارد کنید", "err")
+        return redirect("/messages")
+    try:
+        seconds = max(10, min(3600, int(form.get("seconds") or 300)))
+    except ValueError:
+        seconds = 300
+    res = await run_in_threadpool(winmsg.send, db, mode, value, text, seconds)
+    ok = [r for r in res if r[2]]
+    bad = [r for r in res if not r[2]]
+    log_action(request, "پیام به رایانه‌ها", f"{mode} {value}: {len(ok)} موفق، {len(bad)} ناموفق — {text[:200]}")
+    if not res:
+        flash(request, "رایانهٔ روشنی برای این گیرنده پیدا نشد", "err")
+    else:
+        request.session["msg_result"] = [[r[0], r[1], bool(r[2]), r[3]] for r in res][:200]
+        flash(request, f"پیام به {len(ok)} رایانه رسید" + (f"؛ {len(bad)} ناموفق" if bad else ""), "ok" if ok else "err")
+    return redirect("/messages")

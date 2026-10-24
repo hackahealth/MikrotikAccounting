@@ -1,11 +1,12 @@
 """کارهای پس‌زمینه: اعمال سیاست (قطع خودکار)، دریافت اطلاعات از روتر، همگام‌سازی AD، پاکسازی."""
+import json
 import logging
 import threading
 import time
 from datetime import timedelta
 
-from . import (apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
-               netscope, nightlist, pbx, policy, retention, routeros, security)
+from . import (access, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
+               netscope, nightlist, pbx, pingcheck, policy, retention, routeros, security, wancheck)
 from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
 log = logging.getLogger("jobs")
@@ -71,34 +72,49 @@ def enforce():
 
 
 def _arp_live(a) -> bool:
-    """ARP entry that proves the device is on the network now (ROS7 'status', ROS6 'complete' flag)."""
+    """ARP entry that proves the device is on the network now (ROS7 'status', ROS6 'complete' flag of a dynamic
+    entry). A static / DHCP-made ('permanent') entry stays when the device is off: only a weak sign."""
     if routeros._yes(a.get("disabled")) or routeros._yes(a.get("invalid")) or not a.get("mac-address"):
         return False
     status = str(a.get("status", "")).lower()
     if status:
-        return status in ("reachable", "delay", "probe", "permanent")
-    return routeros._yes(a.get("complete", True)) and not routeros._yes(a.get("published"))
+        return status in ("reachable", "delay", "probe")
+    return routeros._yes(a.get("complete", True)) and not routeros._yes(a.get("published")) \
+        and routeros._yes(a.get("dynamic", True)) and not routeros._yes(a.get("DHCP"))
+
+
+def _host_live(h) -> bool:
+    """Hotspot host with traffic in the last polls (host-dead-time); old RouterOS without the field: weak sign."""
+    v = h.get("host-dead-time")
+    if v in (None, ""):
+        return False
+    return apisessions.uptime_seconds(v) <= config.ROUTER_POLL_EVERY * 3
 
 
 def _record_devices(db, nas, snap, ts):
-    """Device presence on this router: MAC -> IP / logged-in user, kept as history intervals."""
+    """Device presence on this router: MAC -> IP / logged-in user, kept as history intervals.
+    Strong signs (an active login, ARP reachable, recent traffic / DHCP) always count and clear a failed ping check;
+    weak signs (hotspot host or static ARP entry only) count only while the device is not failing the ping check."""
     seen = {}
 
-    def put(mac, ip="", user="", source="", host=None):
+    def put(mac, ip="", user="", source="", host=None, strong=True):
         m = devices.normalize_mac(mac or "")
         if not m:
             return
-        e = seen.setdefault(m, {"ips": {}, "users": {}, "host": None})
+        e = seen.setdefault(m, {"ips": {}, "users": {}, "host": None, "strong": False})
+        e["strong"] = e["strong"] or strong
         if ip:
             e["ips"].setdefault(str(ip), source)
         if user:
             e["users"].setdefault(user, source)
         if host:
             e["host"] = host
-    for a in snap.get("hotspot_active", []):
-        put(a.get("mac-address"), a.get("address"), a.get("user"), "hotspot")
+    for a in snap.get("hotspot_active", []):    # a login whose device has been silent long (keepalive off): weak
+        idle = a.get("idle-time")
+        put(a.get("mac-address"), a.get("address"), a.get("user"), "hotspot",
+            strong=idle in (None, "") or apisessions.uptime_seconds(idle) <= config.ROUTER_POLL_EVERY * 5)
     for h in snap.get("hotspot_hosts", []):
-        put(h.get("mac-address"), h.get("address"), "", "host", h.get("host-name"))
+        put(h.get("mac-address"), h.get("address"), "", "host", h.get("host-name"), strong=_host_live(h))
     for p in snap.get("ppp_active", []):
         put(p.get("caller-id"), p.get("address"), p.get("name"), "ppp")
     for a in snap.get("arp", []):
@@ -110,15 +126,21 @@ def _record_devices(db, nas, snap, ts):
         recent = apisessions.uptime_seconds(lease.get("last-seen")) <= config.ROUTER_POLL_EVERY * 3 \
             if lease.get("last-seen") not in (None, "", "never") else False
         if m and bound and (m in seen or recent):
-            put(m, lease.get("active-address") or lease.get("address"), "", "dhcp", lease.get("host-name"))
+            put(m, lease.get("active-address") or lease.get("address"), "", "dhcp", lease.get("host-name"), strong=recent)
+    n = 0
     for m, e in seen.items():
+        if e["strong"]:
+            pingcheck.alive(m)
+        elif pingcheck.is_dead(m):
+            continue
+        n += 1
         for ip, src in e["ips"].items():
             devices.record(db, m, ip=ip, nas_id=nas.id, source=src, ts=ts, hostname=e["host"])
         for user, src in e["users"].items():
             devices.record(db, m, user=user, nas_id=nas.id, source=src, ts=ts)
         if not e["ips"] and not e["users"]:
             devices.record(db, m, nas_id=nas.id, ts=ts, hostname=e["host"])
-    return len(seen)
+    return n
 
 
 def poll_routers():
@@ -150,6 +172,9 @@ def poll_routers():
             try:
                 classifier.dns_map.update(snap["dns"])
                 netscope.scope.learn(nas.id, snap.get("interfaces", []), snap.get("addresses", []))
+                facts = json.dumps(wancheck.learn(nas, snap), ensure_ascii=False, sort_keys=True)
+                if (nas.iface_facts or "") != facts:
+                    nas.iface_facts = facts
                 for lease in snap["leases"]:
                     if lease.get("mac-address"):
                         devices.upsert(db, lease["mac-address"], hostname=lease.get("host-name"),
@@ -247,4 +272,6 @@ def start():
     _every(config.PBX_SYNC_EVERY, pbx.sync_all)
     _every(config.LOGON_SYNC_EVERY, logons.sync_dcs)
     _every(60, nightlist.job)
+    _every(60, access.job)
+    threading.Thread(target=pingcheck.job, daemon=True, name="job-pingcheck").start()
     _every(86400, cleanup)

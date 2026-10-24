@@ -4,7 +4,7 @@
 <div class="top"><h2>دستگاه‌ها</h2><a class="btn" href="/devices/night">سیستم‌های روشن ساعت {{ night_time }}</a></div>
 <div class="grid g3" style="margin-bottom:16px">
   <div class="card stat"><div class="l">کل دستگاه‌های ثبت‌شده</div><div class="v">{{ counts.all }}</div><div class="hint">سابقه هیچ دستگاهی پاک نمی‌شود</div></div>
-  <div class="card stat"><div class="l">الان روی شبکه</div><div class="v">{{ counts.online }}</div><div class="hint">دیده‌شده در آخرین خواندن روترها</div></div>
+  <div class="card stat"><div class="l">الان روی شبکه</div><div class="v">{{ counts.online }}</div><div class="hint">دیده‌شده در آخرین خواندن روترها{% if ping.last %} و پاسخ‌دهنده به پینگ (بررسی {{ ping.last|jdt }}: {{ ping.dead }} از {{ ping.checked }} پاسخ ندادند){% endif %}</div></div>
   <div class="card stat"><div class="l">راکد</div><div class="v">{{ counts.stale }}</div><div class="hint">بیش از {{ stale_days }} روز دیده نشده</div></div>
 </div>
 <div class="card">
@@ -47,7 +47,7 @@
 {% for d in items %}
 <tr>{% if edit %}<td><input type="checkbox" class="dev" name="ids" value="{{ d.id }}" form="bulk"></td>{% endif %}
 <td class="ltr"><a href="/devices/{{ d.mac }}">{{ d.mac }}</a>{% if d.random_mac %} <span class="badge warn">تصادفی</span>{% endif %}</td>
-<td>{{ st(state[d.id]) }}</td><td class="ltr">{{ d.last_ip or '-' }}</td><td>{{ nas_names.get(d.last_nas_id, '-') }}</td>
+<td>{{ st(state[d.id]) }}{% if d.ping_at %}<div class="hint" title="آخرین پینگ از روتر {{ d.ping_at|jdt }}">{{ 'پینگ ✓' if d.ping_ok else 'پینگ ✗' }}</div>{% endif %}</td><td class="ltr">{{ d.last_ip or '-' }}</td><td>{{ nas_names.get(d.last_nas_id, '-') }}</td>
 <td>{% if edit %}<form class="inline" method="post" action="/devices/{{ d.id }}/type"><input type="hidden" name="back" value="/devices?{{ qs }}"><select name="device_type" onchange="this.form.submit()" style="width:auto">
 {% for k, v in DEVICE_TYPES %}<option value="{{ k }}" {{ 'selected' if d.device_type == k }}>{{ v }}</option>{% endfor %}
 </select></form>{% else %}{{ d.device_type|devtype }}{% endif %}</td>
@@ -70,9 +70,13 @@ boxes().forEach(b=>b.addEventListener('change',upd));all.addEventListener('chang
 <div class="card"><h3>راکد شدن دستگاه</h3>
 <form method="post" action="/devices/settings" class="filters">
   <div><label>دستگاهی که این تعداد روز دیده نشود «راکد» است</label><input name="device_stale_days" class="ltr" value="{{ stale_days }}"></div>
+  <div><label>بررسی آنلاین‌ها با پینگ از روتر، هر چند دقیقه (۰ = خاموش)</label><input name="ping_verify_minutes" class="ltr" value="{{ ping_minutes }}"></div>
+  <div><label><input type="checkbox" name="ping_kick" value="1" {{ 'checked' if ping_kick }}> اتصال هات‌اسپات دستگاهی که به پینگ جواب نمی‌دهد قطع شود</label></div>
   <div><button class="btn p">ذخیره</button></div>
 </form>
-<p class="hint">دستگاه‌ها و سابقه IP و کاربرانشان هرگز پاک نمی‌شوند؛ فقط وضعیت «راکد» می‌گیرند و اگر دوباره دیده شوند فعال می‌شوند. هر بار که دستگاهی با IP یا کاربر تازه دیده شود یک بازه جدید ثبت می‌شود و تا وقتی پشت سر هم دیده می‌شود (فاصله کمتر از {{ (gap.total_seconds() // 60)|int }} دقیقه) همان بازه ادامه پیدا می‌کند. منبع‌ها: لیست active و host هات‌اسپات، PPP، جدول ARP، DHCP lease و Accounting.</p>
+<p class="hint">دستگاه‌ها و سابقه IP و کاربرانشان هرگز پاک نمی‌شوند؛ فقط وضعیت «راکد» می‌گیرند و اگر دوباره دیده شوند فعال می‌شوند. هر بار که دستگاهی با IP یا کاربر تازه دیده شود یک بازه جدید ثبت می‌شود و تا وقتی پشت سر هم دیده می‌شود (فاصله کمتر از {{ (gap.total_seconds() // 60)|int }} دقیقه) همان بازه ادامه پیدا می‌کند. منبع‌ها: لیست active و host هات‌اسپات، PPP، جدول ARP، DHCP lease و Accounting.
+بررسی دوم: روتر هر چند دقیقه همهٔ دستگاه‌های آنلاین را با ARP-ping (که با فایروال ویندوز هم جواب می‌دهد) و پینگ عادی آزمایش می‌کند. دستگاهی که جواب ندهد دیگر از روی نشانه‌های ضعیف (ARP ثابت، host قدیمی هات‌اسپات) آنلاین حساب نمی‌شود تا دوباره با نشانهٔ قطعی (ورود، ترافیک، ARP فعال) دیده شود.
+{% for r, v in ping.by_router.items() %}<br>{{ r }}: {{ v }}{% endfor %}</p>
 </div>
 
 <div class="card" id="logon"><h3>ورود کاربران به رایانه‌ها و فهرست شبانه</h3>

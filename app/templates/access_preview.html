@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>پیش‌نمایش دستورات — {{ n.name }}</h2><a class="btn" href="/access">بازگشت</a></div>
+<p class="hint">این‌ها مواردی است که پنل روی روتر نگه می‌دارد. قوانین قبلی پنل (توضیح macc) پاک و این‌ها بالای قوانین فایروال اضافه می‌شوند؛ قوانین دیگر دست نمی‌خورند.</p>
+<div class="card"><pre class="ltr" style="white-space:pre-wrap;font-size:12px">{{ script }}</pre></div>
+{% endblock %}

@@ -340,29 +340,47 @@ def attendance(db, start: datetime, end: datetime, ids=None):
 def router_internet(db, start: datetime, end: datetime, nas_list):
     """Exact router volumes from interface counters (independent of users and hotspot):
     internet = bytes on the WAN interfaces; tunnel = bytes on the tunnel interfaces (their carrier also crosses
-    the WAN); internet without tunnel = the difference."""
-    from . import ifstats, netscope
+    the WAN); internet without tunnel = the difference. A WAN interface that is only the port under a PPPoE / VLAN
+    also chosen, or that belongs to the internal network, is shown but not counted (wancheck)."""
+    from . import ifstats, netscope, wancheck
     from .db import IfaceDaily
     d1, d2 = start.date(), (end - timedelta(seconds=1)).date()
     rows, tot = [], {"wan_rx": 0, "wan_tx": 0, "tun_rx": 0, "tun_tx": 0, "wan": 0, "tunnel": 0, "pure": 0}
     for nas in nas_list:
         wan, _ = ifstats.roles(nas)
         tun = netscope.split_names(nas.tunnel_interfaces) or netscope.split_names(nas.auto_tunnels or "")
+        chk = wancheck.check(nas, wan)
         vals = {"wan_rx": 0, "wan_tx": 0, "tun_rx": 0, "tun_tx": 0}
+        per = {}
         names = set(wan) | set(tun)
         if names:
             for r in db.query(IfaceDaily).filter(IfaceDaily.nas_id == nas.id, IfaceDaily.iface.in_(names),
                                                  IfaceDaily.day >= d1, IfaceDaily.day <= d2):
-                if r.iface in wan:
-                    vals["wan_rx"] += r.rx or 0
-                    vals["wan_tx"] += r.tx or 0
-                elif r.iface in tun:
-                    vals["tun_rx"] += r.rx or 0
-                    vals["tun_tx"] += r.tx or 0
+                e = per.setdefault(r.iface, [0, 0])
+                e[0] += r.rx or 0
+                e[1] += r.tx or 0
+        ifaces = []
+        for name in wan:
+            rx, tx = per.get(name, (0, 0))
+            counted, note = chk.get(name, (True, ""))
+            if counted and tx > 5 * max(rx, 1) and tx > 1024 ** 3:
+                note = (note + "؛ " if note else "") + "ارسال خیلی بیشتر از دریافت است: احتمالاً سمت شبکهٔ داخلی است"
+            if counted:
+                vals["wan_rx"] += rx
+                vals["wan_tx"] += tx
+            ifaces.append({"name": name, "role": "wan", "rx": rx, "tx": tx, "counted": counted, "note": note})
+        for name in tun:
+            if name in wan:
+                continue
+            rx, tx = per.get(name, (0, 0))
+            vals["tun_rx"] += rx
+            vals["tun_tx"] += tx
+            ifaces.append({"name": name, "role": "tunnel", "rx": rx, "tx": tx, "counted": True, "note": ""})
         vals["wan"] = vals["wan_rx"] + vals["wan_tx"]
         vals["tunnel"] = vals["tun_rx"] + vals["tun_tx"]
         vals["pure"] = max(0, vals["wan"] - vals["tunnel"])
-        rows.append({"nas": nas, "name": nas.name, "wan_ifs": wan, "tun_ifs": tun, **vals})
+        rows.append({"nas": nas, "name": nas.name, "wan_ifs": wan, "tun_ifs": tun, "ifaces": ifaces,
+                     "warn": any(i["note"] for i in ifaces), "suggested": wancheck.suggested(nas), **vals})
         for k in tot:
             tot[k] += vals[k]
     return {"rows": rows, "total": tot, "configured": any(r["wan_ifs"] for r in rows)}

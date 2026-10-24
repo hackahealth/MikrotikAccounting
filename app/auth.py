@@ -50,6 +50,8 @@ PERMISSIONS = {
     "grants_manage": "مجوز موقت (خارج از ساعت / اینترنت آزاد)",
     "data_manage": "مدت نگهداری و حذف سابقه",
     "router_admin": "نسخه، بروزرسانی و ریبوت روترها",
+    "access_manage": "کنترل دسترسی (سایت‌ها، مقاصد داخلی، استثناها)",
+    "ad_message": "ارسال پیام به رایانه‌های کاربران",
 }
 
 ROLES = {
@@ -57,7 +59,8 @@ ROLES = {
     "it": ("کارشناس IT", ["dashboard", "users_view", "users_edit", "groups_edit", "live_view", "live_disconnect",
                           "reports_view", "reports_export", "devices_view", "devices_edit", "logs_view", "ad_sync",
                           "mt_local", "hotspot_deploy", "org_manage", "router_traffic", "pbx_manage", "net_monitor",
-                          "alerts_view", "security_manage", "grants_manage", "router_admin"]),
+                          "alerts_view", "security_manage", "grants_manage", "router_admin", "access_manage",
+                          "ad_message"]),
     "hr": ("کارشناس منابع انسانی", ["dashboard", "users_view", "reports_view", "reports_export", "mgmt_reports",
                                     "attendance", "calls_view"]),
     "unit_manager": ("مدیر دفتر / واحد", ["dashboard", "users_view", "live_view", "reports_view", "reports_export",
@@ -67,7 +70,7 @@ ROLES = {
 SCOPED_FORBIDDEN = {"users_edit", "groups_edit", "live_disconnect", "devices_edit", "nas_manage", "ad_sync",
                     "ad_manage", "settings", "panel_users", "audit_view", "mt_local", "hotspot_deploy", "org_manage",
                     "devices_view", "logs_view", "pbx_manage", "net_monitor", "alerts_view", "security_manage",
-                    "grants_manage", "data_manage", "router_admin"}
+                    "grants_manage", "data_manage", "router_admin", "access_manage", "ad_message"}
 
 # (method, path regex, permission | "a|b" any-of | "" = any logged-in user)
 ROUTES = [
@@ -109,6 +112,9 @@ ROUTES = [
     ("GET", r"/grants", "grants_manage"), ("POST", r"/grants/.*", "grants_manage"),
     ("GET", r"/data", "data_manage"), ("POST", r"/data/.*", "data_manage"),
     ("GET", r"/routeros", "router_admin"), ("POST", r"/routeros/.*", "router_admin"),
+    ("GET", r"/access(/preview/\d+)?", "access_manage"), ("POST", r"/access/.*", "access_manage"),
+    ("GET", r"/winlogons", "devices_view"),
+    ("GET", r"/messages", "ad_message"), ("POST", r"/messages/.*", "ad_message"),
 ]
 _ROUTES = [(m, re.compile(p + r"/?$"), perm) for m, p, perm in ROUTES]
 
