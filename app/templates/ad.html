@@ -19,6 +19,9 @@
   {% for g in groups %}<option {{ 'selected' if cfg.ldap_default_group == g.name }}>{{ g.name }}</option>{% endfor %}</select></div>
 <div class="fg"><label><input type="checkbox" name="ldap_auto_sync" value="1" {{ 'checked' if cfg.ldap_auto_sync == '1' }}> همگام‌سازی خودکار هر ساعت</label></div>
 <div class="fg"><label><input type="checkbox" name="ldap_auto_org" value="1" {{ 'checked' if cfg.ldap_auto_org != '0' }}> دفتر و واحد کاربران از AD خوانده شود (فیلدهای Office و Department؛ اگر وجود نداشت ساخته می‌شود)</label></div>
+<div class="fg"><label>آدرس‌های عمومی سامانه (IP پابلیک یا نام دامنه، با فاصله)</label><input name="public_hosts" class="ltr" value="{{ public_hosts }}" placeholder="46.100.248.60 panel.example.ir">
+  <div class="hint">«مدیریت Active Directory» با این آدرس‌ها و از بیرون شبکهٔ داخلی اصلاً نمایش داده نمی‌شود. IP پابلیک بدون نوشتن هم عمومی حساب می‌شود؛ نام دامنهٔ عمومی را حتماً اینجا بنویسید.
+  الان از {{ 'آدرس داخلی' if internal else 'آدرس عمومی' }} وارد شده‌اید.</div></div>
 <button class="btn p">ذخیره</button>
 </form></div>{% endif %}
 <div class="card"><h3>عملیات</h3>

@@ -1,0 +1,4 @@
+<div class="top"><h2>مدیریت Active Directory</h2></div>
+<p class="hint">این بخش فقط از آدرس داخلی سامانه دیده می‌شود. هر تغییر مستقیم در AD و با حساب سرویس تنظیمات AD انجام و در گزارش فعالیت‌ها ثبت می‌شود.</p>
+<div class="tabs">{% for k, t in [('users','کاربران'),('groups','گروه‌ها'),('ous','واحدهای سازمانی (OU)'),('computers','رایانه‌ها')] %}<a href="/adm/{{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
+{% macro ou_select(name, ous, selected='', empty='') %}<select name="{{ name }}">{% if empty %}<option value="">{{ empty }}</option>{% endif %}{% for dn, n, depth in ous %}<option value="{{ dn }}" {{ 'selected' if dn|lower == selected|lower }}>{{ '— ' * depth }}{{ n }}</option>{% endfor %}</select>{% endmacro %}

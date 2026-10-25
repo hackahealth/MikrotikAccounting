@@ -28,7 +28,7 @@
 <p class="hint">فقط فیلدهایی که تیک خورده‌اند تغییر می‌کنند؛ فیلد تیک‌خورده با مقدار خالی یعنی پاک کردن آن مقدار.</p>
 <div class="grid g3">
   <div class="fg"><label><input type="checkbox" name="set" value="group_id"> گروه</label>
-    <select name="v_group_id" data-set="group_id"><option value="">بدون گروه</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}{{ ' (AD)' if g.ldap_group_dn }}</option>{% endfor %}</select></div>
+    <select name="v_group_id" data-set="group_id"><option value="">بدون گروه</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}{{ ' (AD)' if g.ad_mapped() }}</option>{% endfor %}</select></div>
   <div class="fg"><label><input type="checkbox" name="set" value="office_id"> دفتر</label>
     <select name="v_office_id" data-set="office_id"><option value="">-</option>{% for o in offices %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
   <div class="fg"><label><input type="checkbox" name="set" value="department_id"> واحد</label>

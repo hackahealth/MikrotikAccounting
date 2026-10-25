@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><h3>{{ g.name }} <span class="hint">{{ 'امنیتی' if g.security else 'توزیع' }}</span></h3><div class="hint ltr">{{ g.dn }}</div>
+<form method="post" action="/adm/group/op" class="filters"><input type="hidden" name="dn" value="{{ g.dn }}">
+<div><label>توضیح</label><input name="description" value="{{ g.description }}"></div><div><button class="btn" name="op" value="save">ذخیره</button></div></form></div>
+<div class="card"><h3>افزودن عضو</h3><form method="post" action="/adm/group/op"><input type="hidden" name="dn" value="{{ g.dn }}">
+<div class="fg"><label>نام کاربری یا نام گروه (چند مورد با فاصله یا ویرگول)</label><input name="members" class="ltr" placeholder="m.karimi a.rahimi"></div>
+<button class="btn p" name="op" value="add">افزودن</button></form></div>
+<div class="card tbl"><h3>اعضا ({{ g.members|length }})</h3><table><tr><th>عضو</th><th>DN</th><th></th></tr>
+{% for m in g.members %}<tr><td>{{ names[m] }}</td><td class="hint ltr">{{ m }}</td>
+<td><form method="post" action="/adm/group/op"><input type="hidden" name="dn" value="{{ g.dn }}"><input type="hidden" name="member" value="{{ m }}"><button class="btn s" name="op" value="remove">خارج کردن</button></form></td></tr>
+{% else %}<tr><td colspan="3" class="muted">عضوی ندارد</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>حذف گروه</h3><form method="post" action="/adm/group/op"><input type="hidden" name="dn" value="{{ g.dn }}">
+<div class="fg"><label>برای تأیید، نام گروه را بنویسید</label><input name="confirm" placeholder="{{ g.name }}"></div>
+<button class="btn d" name="op" value="delete">حذف برای همیشه</button></form></div>
+{% endblock %}

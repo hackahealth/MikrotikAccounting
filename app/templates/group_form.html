@@ -10,8 +10,16 @@
   <div class="fg"><label>توضیح</label><input name="description" value="{{ g.description if g else '' }}"></div>
   <div class="fg"><label><input type="checkbox" name="allow_hotspot" value="1" {{ 'checked' if not g or g.allow_hotspot }}> مجاز به هات‌اسپات</label></div>
   <div class="fg"><label><input type="checkbox" name="allow_vpn" value="1" {{ 'checked' if not g or g.allow_vpn }}> مجاز به VPN</label></div>
-  <div class="fg"><label>DN گروه Active Directory (اعضای این گروه AD به این گروه منتقل می‌شوند)</label>
-    <input name="ldap_group_dn" class="ltr" value="{{ g.ldap_group_dn if g else '' }}" placeholder="CN=Internet-Users,OU=Groups,DC=corp,DC=local"></div>
+  <div class="fg"><label>گروه‌های Active Directory (DN، هر خط یکی) — اعضای هر کدام در این گروه قرار می‌گیرند</label>
+    <textarea name="ldap_groups_all" class="ltr" rows="3" placeholder="CN=Internet-Users,OU=Groups,DC=corp,DC=local">{{ g.ad_dns()|join('\n') if g else '' }}</textarea>
+    <div class="hint">گروه اول همان است که با تغییر گروه کاربر در سامانه، کاربر به آن در AD اضافه می‌شود.</div></div>
+  <div class="fg"><label>واحدهای سازمانی (OU) در AD — کاربران زیر هر کدام (هر خط یکی)</label>
+    <textarea name="ldap_ous" class="ltr" rows="2" placeholder="OU=Yazd,OU=Offices,DC=corp,DC=local">{{ g.ldap_ous if g else '' }}</textarea></div>
+  <div class="fg"><label>دفترها (Office در AD یا نام دفتر سامانه، هر خط یکی)</label>
+    <textarea name="ldap_offices" rows="2" placeholder="{{ offices|map(attribute='name')|first if offices else 'دفتر یزد' }}">{{ g.ldap_offices if g else '' }}</textarea>
+    {% if offices %}<div class="hint">دفترهای سامانه: {{ offices|map(attribute='name')|join('، ') }}</div>{% endif %}</div>
+  <div class="fg"><label>اولویت (اگر کاربر با چند گروه جور شود، عدد کمتر برنده است)</label>
+    <input name="ldap_priority" class="ltr" value="{{ g.ldap_priority if g and g.ldap_priority is not none else 100 }}"></div>
   <div class="fg"><label>Address-List میکروتیک (برای فایروال/مسیر جداگانه)</label><input name="address_list" class="ltr" value="{{ g.address_list if g else '' }}"></div>
 </div>
 <div class="card"><h3>محدودیت‌ها</h3>

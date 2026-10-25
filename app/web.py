@@ -2,6 +2,8 @@
 import csv
 import hashlib
 import hmac
+from urllib.parse import quote
+import ipaddress
 import io
 import json
 import logging
@@ -22,7 +24,7 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (access, alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+from . import (access, ad_admin, alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
@@ -118,6 +120,13 @@ async def _auth(request, call_next):
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
     perms = auth.user_permissions(me)
+    internal = is_internal(request)
+    request.state.internal = internal
+    if not internal:
+        perms = perms - auth.INTERNAL_ONLY
+        if path == "/adm" or path.startswith("/adm/"):
+            db.commit()
+            return Response("Not Found", status_code=404, media_type="text/plain")
     request.state.me, request.state.perms = me, perms
     db.commit()             # give the connection back to the pool before the route (maybe in a worker thread) runs
     if me.must_change_password and path not in ("/account", "/logout"):
@@ -133,6 +142,34 @@ async def _auth(request, call_next):
 
 # added after auth_mw so it wraps it (outermost middleware runs first)
 app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY, max_age=12 * 3600)
+
+
+def _public_hosts(db):
+    return {h.strip().lower() for h in re.split(r"[\s,;]+", get_setting(db, "public_hosts", "")) if h.strip()}
+
+
+def is_internal(request) -> bool:
+    """The panel was opened through an internal address: the browser's IP is in the internal networks and the
+    address typed (Host) is not a public IP / a name marked public. Behind the router's port forward a visitor
+    from outside comes with the public IP in Host (and usually a public source IP)."""
+    db = SessionLocal()
+    nets = netscope.parse_ranges(get_setting(db, "internal_ranges", access.DEFAULT_INTERNAL))[0] + \
+        netscope.parse_ranges("127.0.0.0/8 ::1/128")[0]
+    client = request.client.host if request.client else ""
+    try:
+        cip = ipaddress.ip_address(client)
+    except ValueError:
+        return client in ("testclient", "testserver")       # the test client
+    if not netscope._in(cip, nets):
+        return False
+    host = (request.headers.get("host", "") or "").strip().lower()
+    host = host[1:].split("]")[0] if host.startswith("[") else host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if host in _public_hosts(db):
+        return False
+    try:
+        return netscope._in(ipaddress.ip_address(host), nets)
+    except ValueError:
+        return True                                          # an internal name (panel.corp.local)
 
 
 def render(request, name, **ctx):
@@ -889,13 +926,13 @@ def groups_list(request: Request):
 
 @app.get("/groups/new", response_class=HTMLResponse)
 def group_new(request: Request):
-    return render(request, "group_form.html", g=None)
+    return render(request, "group_form.html", g=None, offices=SessionLocal().query(Office).order_by(Office.name).all())
 
 
 @app.get("/groups/{gid}/edit", response_class=HTMLResponse)
 def group_edit(request: Request, gid: int):
     db = SessionLocal()
-    return render(request, "group_form.html", g=db.get(Group, gid))
+    return render(request, "group_form.html", g=db.get(Group, gid), offices=db.query(Office).order_by(Office.name).all())
 
 
 @app.post("/groups/save")
@@ -922,7 +959,12 @@ async def group_save(request: Request):
     g.allow_hotspot = _bool(form, "allow_hotspot")
     g.allow_vpn = _bool(form, "allow_vpn")
     g.address_list = str(form.get("address_list", "")).strip()
-    g.ldap_group_dn = str(form.get("ldap_group_dn", "")).strip()
+    dns = Group._lines(form.get("ldap_groups_all", ""))
+    g.ldap_group_dn = dns[0] if dns else ""
+    g.ldap_groups = "\n".join(dns[1:])
+    g.ldap_ous = "\n".join(Group._lines(form.get("ldap_ous", "")))
+    g.ldap_offices = "\n".join(Group._lines(form.get("ldap_offices", "")))
+    g.ldap_priority = _int(form.get("ldap_priority"), 100)
     if not gid:
         db.add(g)
     db.commit()
@@ -1272,9 +1314,10 @@ def _ad_page(request, ad_groups=None):
     db = SessionLocal()
     cfg = {k: get_setting(db, k) for k in LDAP_KEYS}
     cfg["ldap_bind_password"] = "********" if cfg["ldap_bind_password"] else ""
-    mapped = {g.ldap_group_dn.lower(): g.name for g in db.query(Group).all() if g.ldap_group_dn}
+    mapped = {d.lower(): g.name for g in db.query(Group).all() for d in g.ad_dns()}
     return render(request, "ad.html", cfg=cfg, groups=db.query(Group).order_by(Group.name).all(),
-                  ad_groups=ad_groups, mapped=mapped,
+                  ad_groups=ad_groups, mapped=mapped, public_hosts=get_setting(db, "public_hosts", ""),
+                  internal=is_internal(request),
                   ldap_users=db.query(User).filter(User.source == "ldap").count())
 
 
@@ -1296,6 +1339,8 @@ async def ad_save(request: Request):
         if k in ("ldap_use_ssl", "ldap_auto_sync", "ldap_auto_org"):
             v = "1" if _bool(form, k) else "0"
         set_setting(db, k, v)
+    if "public_hosts" in form:
+        set_setting(db, "public_hosts", " ".join(re.split(r"[\s,;]+", str(form.get("public_hosts", "")).strip())))
     if _bool(form, "ldap_use_ssl") and str(form.get("ldap_port", "")).strip() in ("", "389"):
         set_setting(db, "ldap_port", "636")
     db.commit()
@@ -3619,3 +3664,269 @@ async def messages_send(request: Request):
         request.session["msg_result"] = [[r[0], r[1], bool(r[2]), r[3]] for r in res][:200]
         flash(request, f"پیام به {len(ok)} رایانه رسید" + (f"؛ {len(bad)} ناموفق" if bad else ""), "ok" if ok else "err")
     return redirect("/messages")
+
+
+# ------------------------------------------------------------------ Active Directory administration (internal only)
+def _adm(request, secure=False):
+    return ad_admin.AD(SessionLocal(), secure=secure)
+
+
+def _adm_error(request, e, back):
+    flash(request, str(e), "err")
+    return redirect(back)
+
+
+def _adm_sync(db, sam):
+    """Bring the changed AD account into the panel's users at once."""
+    try:
+        ldap_ad.sync_users(db, [sam])
+    except Exception as e:      # the AD change itself is done
+        logging.getLogger("web").warning("AD sync of %s: %s", sam, e)
+
+
+def _back(form, default):
+    return _local(form.get("back"), default)
+
+
+@app.get("/adm", response_class=HTMLResponse)
+@app.get("/adm/users", response_class=HTMLResponse)
+def adm_users(request: Request, q: str = "", ou: str = ""):
+    try:
+        with _adm(request) as ad:
+            users = ad.users(q.strip(), ou) if (q.strip() or ou) else ad.users(limit=300)
+            ous, groups = ad.ous(), ad.groups()
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_users.html", users=users, ous=ous, groups=groups, q=q, ou=ou, tab="users",
+                  editable=ad_admin.EDITABLE)
+
+
+@app.get("/adm/user", response_class=HTMLResponse)
+def adm_user(request: Request, dn: str):
+    try:
+        with _adm(request) as ad:
+            u, ous, groups = ad.user(dn), ad.ous(), ad.groups()
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_user.html", u=u, ous=ous, groups=groups, tab="users", editable=ad_admin.EDITABLE)
+
+
+@app.post("/adm/users/create")
+async def adm_user_create(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    pw = str(form.get("password", ""))
+    try:
+        with _adm(request, secure=bool(pw)) as ad:
+            dn = ad.create_user(str(form.get("ou", "")), str(form.get("sam", "")), str(form.get("given", "")).strip(),
+                                str(form.get("sn", "")).strip(), str(form.get("display", "")),
+                                pw, _bool(form, "must_change"), _bool(form, "enabled"),
+                                {k: str(form.get(k, "")).strip() for k, _ in ad_admin.EDITABLE
+                                 if k not in ("givenName", "sn", "displayName")},
+                                form.getlist("groups"))
+    except Exception as e:
+        return _adm_error(request, e, "/adm/users")
+    sam = str(form.get("sam", "")).strip()
+    log_action(request, "AD: ساخت کاربر", f"{sam} — {dn}")
+    _adm_sync(db, sam)
+    flash(request, f"کاربر {sam} در AD ساخته شد" + ("" if pw else " (بدون رمز و غیرفعال؛ رمز را تعیین و فعال کنید)"))
+    return redirect("/adm/user?dn=" + quote(dn))
+
+
+@app.post("/adm/user/op")
+async def adm_user_op(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    dn, op = str(form.get("dn", "")), str(form.get("op", ""))
+    back = "/adm/user?dn=" + quote(dn)
+    try:
+        with _adm(request, secure=(op == "password")) as ad:
+            u = ad.user(dn)
+            if op == "save":
+                ad.update_user(dn, {k: str(form.get(k, "")).strip() for k, _ in ad_admin.EDITABLE})
+                msg = "مشخصات ذخیره شد"
+            elif op in ("enable", "disable"):
+                ad.set_enabled(dn, op == "enable")
+                msg = "حساب فعال شد" if op == "enable" else "حساب غیرفعال شد"
+            elif op == "unlock":
+                ad.unlock(dn)
+                msg = "قفل حساب باز شد"
+            elif op == "password":
+                pw = str(form.get("password", ""))
+                if len(pw) < 6:
+                    raise ad_admin.ADError("رمز را وارد کنید")
+                ad.set_password(dn, pw, _bool(form, "must_change"))
+                msg = "رمز تعیین شد"
+            elif op == "move":
+                dn = ad.move(dn, str(form.get("ou", "")))
+                back = "/adm/user?dn=" + quote(dn)
+                msg = "به OU جدید منتقل شد"
+            elif op == "groups":
+                ad.set_groups(dn, form.getlist("groups"), u["member_of"])
+                msg = "گروه‌های کاربر ذخیره شد"
+            elif op == "delete":
+                if form.get("confirm") != u["sam"]:
+                    raise ad_admin.ADError("برای حذف، نام کاربری را دقیق در کادر تأیید بنویسید")
+                ad.delete(dn)
+                back, msg = "/adm/users", f"کاربر {u['sam']} از AD حذف شد"
+            else:
+                return redirect(back)
+    except Exception as e:
+        return _adm_error(request, e, back)
+    log_action(request, "AD: " + {"save": "ویرایش کاربر", "enable": "فعال کردن کاربر", "disable": "غیرفعال کردن کاربر",
+                                  "unlock": "باز کردن قفل", "password": "تعیین رمز", "move": "انتقال کاربر",
+                                  "groups": "گروه‌های کاربر", "delete": "حذف کاربر"}[op],
+               f"{u['sam']}" + (f" → {', '.join(ldap_ad._cn(g) for g in form.getlist('groups'))}" if op == "groups" else ""))
+    _adm_sync(db, u["sam"])
+    flash(request, msg)
+    return redirect(back)
+
+
+@app.get("/adm/groups", response_class=HTMLResponse)
+def adm_groups(request: Request, q: str = "", ou: str = ""):
+    try:
+        with _adm(request) as ad:
+            groups, ous = ad.groups(q.strip(), ou), ad.ous()
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_groups.html", groups=groups, ous=ous, q=q, ou=ou, tab="groups",
+                  scopes=ad_admin.GROUP_SCOPES)
+
+
+@app.get("/adm/group", response_class=HTMLResponse)
+def adm_group(request: Request, dn: str):
+    try:
+        with _adm(request) as ad:
+            g = ad.group(dn)
+            names = {}
+            for m in g["members"]:
+                names[m] = ldap_ad._cn(m)
+            groups = ad.groups()
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_group.html", g=g, names=names, groups=groups, tab="groups")
+
+
+@app.post("/adm/groups/create")
+async def adm_group_create(request: Request):
+    form = await request.form()
+    try:
+        with _adm(request) as ad:
+            dn = ad.create_group(str(form.get("ou", "")), str(form.get("name", "")), str(form.get("scope", "global")),
+                                 form.get("type", "security") == "security", str(form.get("description", "")).strip())
+    except Exception as e:
+        return _adm_error(request, e, "/adm/groups")
+    log_action(request, "AD: ساخت گروه", dn)
+    flash(request, "گروه ساخته شد")
+    return redirect("/adm/group?dn=" + quote(dn))
+
+
+@app.post("/adm/group/op")
+async def adm_group_op(request: Request):
+    form = await request.form()
+    dn, op = str(form.get("dn", "")), str(form.get("op", ""))
+    back = "/adm/group?dn=" + quote(dn)
+    try:
+        with _adm(request) as ad:
+            if op == "add":
+                added = []
+                for name in re.split(r"[\s,;]+", str(form.get("members", ""))):
+                    if not name:
+                        continue
+                    m = ad.find_user(name) or next((g["dn"] for g in ad.groups(name) if g["name"].lower() == name.lower()), "")
+                    if not m:
+                        raise ad_admin.ADError(f"{name} در AD پیدا نشد")
+                    ad.add_member(dn, m)
+                    added.append(name)
+                msg = f"{len(added)} عضو اضافه شد"
+            elif op == "remove":
+                ad.remove_member(dn, str(form.get("member", "")))
+                msg = "عضو خارج شد"
+            elif op == "save":
+                ad._ok(ad.conn.modify(dn, {"description": [(ad_admin.MODIFY_REPLACE,
+                                                            [str(form.get("description", "")).strip()] if form.get("description") else [])]}),
+                       "ذخیره ناموفق:")
+                msg = "ذخیره شد"
+            elif op == "move":
+                dn = ad.move(dn, str(form.get("ou", "")))
+                back, msg = "/adm/group?dn=" + quote(dn), "منتقل شد"
+            elif op == "delete":
+                if form.get("confirm") != ldap_ad._cn(dn):
+                    raise ad_admin.ADError("برای حذف، نام گروه را دقیق در کادر تأیید بنویسید")
+                ad.delete(dn)
+                back, msg = "/adm/groups", "گروه حذف شد"
+            else:
+                return redirect(back)
+    except Exception as e:
+        return _adm_error(request, e, back)
+    log_action(request, f"AD: گروه {op}", f"{ldap_ad._cn(dn)} {form.get('members', '') or ldap_ad._cn(str(form.get('member', '')))}".strip())
+    flash(request, msg)
+    return redirect(back)
+
+
+@app.get("/adm/ous", response_class=HTMLResponse)
+def adm_ous(request: Request):
+    try:
+        with _adm(request) as ad:
+            ous = ad.ous()
+            base = ad.base
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_ous.html", ous=ous, base=base, tab="ous")
+
+
+@app.post("/adm/ous/op")
+async def adm_ous_op(request: Request):
+    form = await request.form()
+    op = str(form.get("op", ""))
+    try:
+        with _adm(request) as ad:
+            if op == "create":
+                dn = ad.create_ou(str(form.get("parent", "")), str(form.get("name", "")).strip(),
+                                  str(form.get("description", "")).strip())
+                msg = f"OU ساخته شد: {dn}"
+            elif op == "delete":
+                dn = str(form.get("dn", ""))
+                ad.delete_ou(dn)
+                msg = "OU حذف شد"
+            else:
+                return redirect("/adm/ous")
+    except Exception as e:
+        return _adm_error(request, e, "/adm/ous")
+    log_action(request, f"AD: OU {op}", dn)
+    flash(request, msg)
+    return redirect("/adm/ous")
+
+
+@app.get("/adm/computers", response_class=HTMLResponse)
+def adm_computers(request: Request, q: str = "", ou: str = ""):
+    try:
+        with _adm(request) as ad:
+            comps, ous = ad.computers(q.strip(), ou), ad.ous()
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e))
+    return render(request, "adm_computers.html", comps=comps, ous=ous, q=q, ou=ou, tab="computers")
+
+
+@app.post("/adm/computer/op")
+async def adm_computer_op(request: Request):
+    form = await request.form()
+    dn, op = str(form.get("dn", "")), str(form.get("op", ""))
+    back = _back(form, "/adm/computers")
+    try:
+        with _adm(request) as ad:
+            if op in ("enable", "disable"):
+                ad.set_computer_enabled(dn, op == "enable")
+            elif op == "move":
+                ad.move(dn, str(form.get("ou", "")))
+            elif op == "delete":
+                if form.get("confirm") != ldap_ad._cn(dn):
+                    raise ad_admin.ADError("برای حذف، نام رایانه را دقیق در کادر تأیید بنویسید")
+                ad.delete(dn)
+            else:
+                return redirect(back)
+    except Exception as e:
+        return _adm_error(request, e, back)
+    log_action(request, f"AD: رایانه {op}", ldap_ad._cn(dn))
+    flash(request, "انجام شد")
+    return redirect(back)

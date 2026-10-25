@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import ou_select with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><form class="filters" method="get">
+  <div><label>نام رایانه</label><input name="q" value="{{ q }}" class="ltr"></div>
+  <div><label>OU</label>{{ ou_select('ou', ous, ou, 'همه') }}</div>
+  <div><button class="btn p">نمایش</button></div></form></div>
+<div class="card tbl"><table><tr><th>رایانه</th><th>سیستم‌عامل</th><th>OU</th><th>آخرین ورود</th><th>وضعیت</th><th>انتقال</th><th></th></tr>
+{% for c in comps %}{% set back = '/adm/computers?q=' ~ (q|urlencode) ~ '&ou=' ~ (ou|urlencode) %}
+<tr><td class="ltr">{{ c.name }}<div class="hint">{{ c.dns }}</div></td><td class="hint">{{ c.os }} {{ c.os_version }}</td>
+<td class="hint ltr">{{ c.ou.split(',')[0].split('=')[-1] }}</td><td>{{ c.last_logon|jdt if c.last_logon else '-' }}</td>
+<td>{% if c.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}</td>
+<td><form method="post" action="/adm/computer/op" style="display:flex;gap:4px"><input type="hidden" name="dn" value="{{ c.dn }}"><input type="hidden" name="back" value="{{ back }}">{{ ou_select('ou', ous, c.ou) }}<button class="btn s" name="op" value="move">انتقال</button></form></td>
+<td><form method="post" action="/adm/computer/op"><input type="hidden" name="dn" value="{{ c.dn }}"><input type="hidden" name="back" value="{{ back }}">
+{% if c.disabled %}<button class="btn s" name="op" value="enable">فعال</button>{% else %}<button class="btn s" name="op" value="disable">غیرفعال</button>{% endif %}</form></td></tr>
+{% else %}<tr><td colspan="7" class="muted">رایانه‌ای پیدا نشد</td></tr>{% endfor %}</table></div>
+{% endblock %}

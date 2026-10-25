@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import ou_select with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><form class="filters" method="get">
+  <div><label>جستجو</label><input name="q" value="{{ q }}" placeholder="نام کاربری، نام، ایمیل، واحد"></div>
+  <div><label>OU</label>{{ ou_select('ou', ous, ou, 'همه') }}</div>
+  <div><button class="btn p">نمایش</button></div></form></div>
+<details class="card"><summary><b>کاربر جدید در AD</b></summary>
+<form method="post" action="/adm/users/create">
+<div class="grid g3">
+  <div class="fg"><label>OU</label>{{ ou_select('ou', ous, ou, 'CN=Users (پیش‌فرض)') }}</div>
+  <div class="fg"><label>نام کاربری (sAMAccountName)</label><input name="sam" class="ltr" required maxlength="20"></div>
+  <div class="fg"><label>نام نمایشی</label><input name="display" placeholder="از نام و نام خانوادگی"></div>
+  <div class="fg"><label>نام</label><input name="given"></div>
+  <div class="fg"><label>نام خانوادگی</label><input name="sn"></div>
+  <div class="fg"><label>رمز اولیه</label><input name="password" type="password" class="ltr" autocomplete="new-password"></div>
+  {% for k, label in editable if k not in ('givenName', 'sn', 'displayName') %}
+  <div class="fg"><label>{{ label }}</label><input name="{{ k }}" {{ 'class=ltr' if k in ('mail', 'telephoneNumber', 'mobile', 'ipPhone', 'employeeID') }}></div>{% endfor %}
+</div>
+<div class="fg"><label><input type="checkbox" name="must_change" value="1" checked> تغییر رمز در اولین ورود</label>
+<label><input type="checkbox" name="enabled" value="1" checked> حساب فعال باشد</label></div>
+<div class="fg"><label>عضو این گروه‌ها شود</label>
+<select name="groups" multiple size="8">{% for g in groups %}<option value="{{ g.dn }}">{{ g.name }}{% if g.description %} — {{ g.description }}{% endif %}</option>{% endfor %}</select>
+<div class="hint">با Ctrl چند گروه را انتخاب کنید.</div></div>
+<button class="btn p">ساخت کاربر</button>
+<p class="hint">بدون رمز، حساب غیرفعال ساخته می‌شود. رمز فقط روی اتصال رمزشده (LDAPS یا StartTLS) فرستاده می‌شود.</p>
+</form></details>
+<div class="card tbl"><table>
+<tr><th>نام کاربری</th><th>نام</th><th>واحد / دفتر</th><th>OU</th><th>وضعیت</th><th>آخرین ورود</th><th>گروه‌ها</th></tr>
+{% for u in users %}
+<tr><td class="ltr"><a href="/adm/user?dn={{ u.dn|urlencode }}">{{ u.sam }}</a></td><td>{{ u.name }}</td>
+<td>{{ u.attrs.department }}{% if u.attrs.physicalDeliveryOfficeName %} / {{ u.attrs.physicalDeliveryOfficeName }}{% endif %}</td>
+<td class="hint ltr">{{ u.ou.split(',')[0].split('=')[-1] }}</td>
+<td>{% if u.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}{% if u.locked %} <span class="badge warn">قفل</span>{% endif %}</td>
+<td>{{ u.last_logon|jdt if u.last_logon else '-' }}</td><td class="hint">{{ u.member_of|length }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">کاربری پیدا نشد</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

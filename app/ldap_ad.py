@@ -381,6 +381,35 @@ def _escape(v):
     return escape_filter_chars(v)
 
 
+def group_rules(db, groups=None):
+    """[(group, dns, ous, offices)] of the panel groups mapped to AD, in priority order."""
+    from .db import Office
+    groups = groups if groups is not None else db.query(Group).all()
+    names = {}
+    for o in db.query(Office).all():           # a panel office also matches the AD value it is linked to
+        names.setdefault(o.name.lower(), set()).update({o.name.lower()} | ({o.ldap_value.lower()} if o.ldap_value else set()))
+    out = []
+    for g in sorted(groups, key=lambda g: (g.ldap_priority if g.ldap_priority is not None else 100, g.id or 0)):
+        offices = set()
+        for v in g.ad_offices():
+            offices |= names.get(v.lower(), {v.lower()})
+        dns, ous = {d.lower() for d in g.ad_dns()}, [o.lower() for o in g.ad_ous()]
+        if dns or ous or offices:
+            out.append((g, dns, ous, offices))
+    return out
+
+
+def match_group(rules, u):
+    """The first mapped group (by priority) whose AD group, OU or office the AD user has; None when none."""
+    member = {m.lower() for m in u.get("member_of", [])}
+    dn = str(u.get("dn", "")).lower()
+    office = str(u.get("office") or "").strip().lower()
+    for g, dns, ous, offices in rules:
+        if member & dns or any(dn.endswith("," + o) for o in ous) or (office and office in offices):
+            return g
+    return None
+
+
 def sync_users(db, only_usernames=None):
     """Create/update users from AD. Returns dict of counters."""
     only = {n.lower() for n in only_usernames} if only_usernames else None
@@ -389,7 +418,7 @@ def sync_users(db, only_usernames=None):
         raise RuntimeError("هیچ کاربری از AD دریافت نشد؛ «تست اتصال» را بزنید و Base DN و فیلتر را بررسی کنید. "
                            "(کاربران فعلی غیرفعال نشدند)")
     groups = db.query(Group).all()
-    by_dn = {g.ldap_group_dn.lower(): g for g in groups if g.ldap_group_dn}
+    rules = group_rules(db, groups)
     default_name = get_setting(db, "ldap_default_group")
     default_group = next((g for g in groups if g.name == default_name), None)
     stats = {"created": 0, "updated": 0, "disabled": 0, "total": len(users)}
@@ -399,7 +428,8 @@ def sync_users(db, only_usernames=None):
         if not u["username"] or (only and u["username"].lower() not in only):
             continue
         seen.add(u["username"].lower())
-        group = next((by_dn[m] for m in u["member_of"] if m in by_dn), default_group)
+        matched = match_group(rules, u)
+        group = matched or default_group
         obj = db.query(User).filter(func.lower(User.username) == u["username"].lower()).first()
         if obj is None:
             obj = User(username=u["username"], source="ldap", group=group)
@@ -411,8 +441,8 @@ def sync_users(db, only_usernames=None):
             if obj.source == "router":        # was auto-created from a router's accounting; it is an AD account
                 obj.source = "ldap"
             stats["updated"] += 1
-            if group is not None and any(m in by_dn for m in u["member_of"]):
-                obj.group = group
+            if matched is not None:
+                obj.group = matched
         obj.full_name, obj.email, obj.phone, obj.ldap_dn = u["full_name"], u["email"], u["phone"], u["dn"]
         obj.mobile, obj.title, obj.company, obj.city = u["mobile"], u["title"], u["company"], u["city"]
         obj.ip_phone = (u.get("ip_phone") or "")[:50]

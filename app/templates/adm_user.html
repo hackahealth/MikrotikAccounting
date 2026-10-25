@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import ou_select with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><h3>{{ u.name }} <span class="ltr hint">{{ u.sam }}</span>
+{% if u.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}{% if u.locked %} <span class="badge warn">قفل</span>{% endif %}</h3>
+<div class="hint ltr">{{ u.dn }}</div>
+<div class="hint">UPN: <span class="ltr">{{ u.upn }}</span> · ساخته شده: {{ u.created|jdt if u.created else '-' }} · آخرین ورود: {{ u.last_logon|jdt if u.last_logon else '-' }} · آخرین تغییر رمز: {{ u.pwd_set|jdt if u.pwd_set else 'باید در ورود بعدی تغییر کند' }}</div>
+<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+<form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+{% if u.disabled %}<button class="btn p" name="op" value="enable">فعال کردن</button>{% else %}<button class="btn" name="op" value="disable">غیرفعال کردن</button>{% endif %}
+{% if u.locked %}<button class="btn" name="op" value="unlock">باز کردن قفل</button>{% endif %}</form>
+<a class="btn" href="/users?q={{ u.sam|urlencode }}">کاربر در سامانه</a></div></div>
+
+<div class="card"><h3>مشخصات</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+<div class="grid g3">{% for k, label in editable %}
+<div class="fg"><label>{{ label }}</label><input name="{{ k }}" value="{{ u.attrs[k] }}" {{ 'class=ltr' if k in ('mail', 'telephoneNumber', 'mobile', 'ipPhone', 'employeeID') }}></div>{% endfor %}</div>
+<button class="btn p" name="op" value="save">ذخیره در AD</button></form></div>
+
+<div class="card"><h3>گروه‌ها (دسترسی‌ها)</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+{% set mine = u.member_of|map('lower')|list %}
+<input class="ltr" placeholder="فیلتر گروه‌ها" oninput="var v=this.value.toLowerCase();document.querySelectorAll('#ug label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(v)?'':'none')">
+<div id="ug" style="columns:3 220px;margin:8px 0">{% for g in groups %}
+<label style="display:block"><input type="checkbox" name="groups" value="{{ g.dn }}" {{ 'checked' if g.dn|lower in mine }}> {{ g.name }}{% if not g.security %} <span class="hint">(توزیع)</span>{% endif %}</label>{% endfor %}</div>
+<button class="btn p" name="op" value="groups">ذخیرهٔ عضویت‌ها</button>
+<span class="hint">گروه اصلی (Domain Users) در این فهرست نیست و تغییر نمی‌کند.</span></form></div>
+
+<div class="grid g3">
+<div class="card"><h3>تعیین رمز</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+<div class="fg"><input type="password" name="password" class="ltr" autocomplete="new-password" required minlength="6"></div>
+<label><input type="checkbox" name="must_change" value="1" checked> تغییر رمز در ورود بعدی</label>
+<div><button class="btn p" name="op" value="password">تعیین رمز</button></div></form></div>
+<div class="card"><h3>انتقال به OU دیگر</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+<div class="fg">{{ ou_select('ou', ous, u.ou) }}</div><button class="btn" name="op" value="move">انتقال</button></form></div>
+<div class="card"><h3>حذف از AD</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
+<div class="fg"><label>برای تأیید، نام کاربری را بنویسید</label><input name="confirm" class="ltr" placeholder="{{ u.sam }}"></div>
+<button class="btn d" name="op" value="delete">حذف برای همیشه</button></form></div>
+</div>
+{% endblock %}

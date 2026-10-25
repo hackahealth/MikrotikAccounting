@@ -2338,3 +2338,110 @@ def test_wan_check_ping_verify_access_control_and_windows_pages(env, monkeypatch
     db.close()
     pingcheck.DEAD.clear()
     access.invalidate()
+
+
+def test_ad_administration_internal_only_and_group_mapping(env, monkeypatch):
+    from urllib.parse import quote
+
+    from app import ad_admin, ldap_ad
+    from app.db import Office, set_setting
+    from app.web import app
+    person = {"objectClass": ["top", "person", "organizationalPerson", "user"], "objectCategory": "person",
+              "userAccountControl": 512}
+    entries = [("DC=corp,DC=local", {"objectClass": ["top", "domain"], "dc": "corp"}),
+               ("OU=Offices,DC=corp,DC=local", {"objectClass": ["top", "organizationalUnit"], "ou": "Offices"}),
+               ("OU=Yazd,OU=Offices,DC=corp,DC=local", {"objectClass": ["top", "organizationalUnit"], "ou": "Yazd"}),
+               ("CN=Users,DC=corp,DC=local", {"objectClass": ["top", "container"], "cn": "Users"}),
+               ("CN=Reza Yazdi,OU=Yazd,OU=Offices,DC=corp,DC=local",
+                {**person, "sAMAccountName": "reza.y", "displayName": "رضا یزدی", "cn": "Reza Yazdi"}),
+               ("CN=Mina Office,CN=Users,DC=corp,DC=local",
+                {**person, "sAMAccountName": "mina.o", "displayName": "مینا", "cn": "Mina Office",
+                 "physicalDeliveryOfficeName": "Tehran-HQ"}),
+               ("CN=Net-VIP,CN=Users,DC=corp,DC=local", {"objectClass": ["top", "group"], "cn": "Net-VIP",
+                                                         "sAMAccountName": "Net-VIP", "groupType": -2147483646})]
+    conn = _mock_ad(entries)
+    conn.unbind = lambda: None
+    monkeypatch.setattr(ldap_ad, "_connect", lambda c, timeout=30: conn)
+    db = SessionLocal()
+    for k, v in {"ldap_server": "dc1", "ldap_domain": "corp.local", "ldap_bind_user": "svc",
+                 "ldap_base_dn": "DC=corp,DC=local", "ldap_user_filter": "", "ldap_use_ssl": "1"}.items():
+        set_setting(db, k, v)
+    db.commit()
+
+    # the AD pages exist only through the internal address
+    with TestClient(app, client=("8.8.8.8", 4000)) as c:
+        _login(c, "admin", "Secret12345")
+        assert c.get("/adm/users").status_code == 404
+        assert c.post("/adm/groups/create", data={"name": "X"}).status_code == 404
+        assert "مدیریت Active Directory" not in c.get("/").text
+    with TestClient(app, client=("192.168.1.20", 4000), headers={"host": "46.100.248.60:9090"}) as c:
+        _login(c, "admin", "Secret12345")
+        assert c.get("/adm").status_code == 404                       # through the router's public IP
+    set_setting(db, "public_hosts", "panel.example.ir")
+    db.commit()
+    with TestClient(app, client=("192.168.1.20", 4000), headers={"host": "panel.example.ir"}) as c:
+        _login(c, "admin", "Secret12345")
+        assert c.get("/adm/ous").status_code == 404
+    with TestClient(app, client=("192.168.1.20", 4000), headers={"host": "192.168.1.5:9090"}) as c:
+        _login(c, "admin", "Secret12345")
+        assert "مدیریت Active Directory" in c.get("/").text
+        r = c.get("/adm/ous")
+        assert r.status_code == 200 and "Yazd" in r.text
+        # OU, group, user
+        r = c.post("/adm/ous/op", data={"op": "create", "parent": "OU=Offices,DC=corp,DC=local", "name": "Shiraz"})
+        assert "OU ساخته شد" in r.text
+        r = c.post("/adm/groups/create", data={"ou": "OU=Offices,DC=corp,DC=local", "name": "Net-Staff",
+                                                "scope": "global", "type": "security", "description": "کارکنان"})
+        assert "گروه ساخته شد" in r.text and "Net-Staff" in r.text
+        gdn = "CN=Net-Staff,OU=Offices,DC=corp,DC=local"
+        monkeypatch.setattr(ad_admin.AD, "set_password", lambda self, dn, pw, must=True: None)
+        r = c.post("/adm/users/create", data={"ou": "OU=Shiraz,OU=Offices,DC=corp,DC=local", "sam": "sara.n",
+                                               "given": "سارا", "sn": "نوری", "password": "Aa123456!",
+                                               "must_change": "1", "enabled": "1", "department": "مالی",
+                                               "groups": [gdn, "CN=Net-VIP,CN=Users,DC=corp,DC=local"]})
+        assert "در AD ساخته شد" in r.text, r.text[:3000]
+        udn = "CN=سارا نوری,OU=Shiraz,OU=Offices,DC=corp,DC=local"
+        with ad_admin.AD(db) as ad:
+            u = ad.user(udn)
+            assert u["sam"] == "sara.n" and not u["disabled"] and u["attrs"]["department"] == "مالی"
+            assert udn in ad.group(gdn)["members"]
+        r = c.post("/adm/user/op", data={"dn": udn, "op": "disable"})
+        assert "حساب غیرفعال شد" in r.text
+        r = c.post("/adm/group/op", data={"dn": gdn, "op": "add", "members": "reza.y"})
+        assert "1 عضو اضافه شد" in r.text and "Reza Yazdi" in r.text
+        r = c.post("/adm/user/op", data={"dn": udn, "op": "move", "ou": "OU=Yazd,OU=Offices,DC=corp,DC=local"})
+        assert "منتقل شد" in r.text
+        udn = "CN=سارا نوری,OU=Yazd,OU=Offices,DC=corp,DC=local"
+        r = c.post("/adm/user/op", data={"dn": udn, "op": "delete", "confirm": "wrong"})
+        assert "دقیق در کادر تأیید" in r.text
+        r = c.post("/adm/ous/op", data={"op": "delete", "dn": "OU=Yazd,OU=Offices,DC=corp,DC=local"})
+        assert "خالی نیست" in r.text
+        assert c.get("/adm/user?dn=" + quote(udn)).status_code == 200
+        assert c.get("/adm/group?dn=" + quote(gdn)).status_code == 200
+        assert c.get("/adm/computers").status_code == 200
+        r = c.post("/adm/user/op", data={"dn": udn, "op": "delete", "confirm": "sara.n"})
+        assert "از AD حذف شد" in r.text
+        # internet groups mapped to AD OUs / offices, by priority
+        db.add(Office(name="ستاد تهران", ldap_value="Tehran-HQ"))
+        db.commit()
+        r = c.post("/groups/save", data={"name": "اینترنت یزد", "ldap_groups_all": "", "quota_period": "monthly",
+                                         "ldap_ous": "OU=Yazd,OU=Offices,DC=corp,DC=local", "ldap_priority": "10",
+                                         "simultaneous_use": "1"})
+        r = c.post("/groups/save", data={"name": "اینترنت تهران", "ldap_offices": "ستاد تهران",
+                                         "ldap_groups_all": "CN=Net-VIP,CN=Users,DC=corp,DC=local\n" + gdn,
+                                         "quota_period": "monthly", "ldap_priority": "20", "simultaneous_use": "1"})
+        g = db.query(Group).filter_by(name="اینترنت تهران").one()
+        assert g.ldap_group_dn == "CN=Net-VIP,CN=Users,DC=corp,DC=local" and g.ldap_groups == gdn
+        assert "OU: <span class=\"ltr\">Yazd" in c.get("/groups").text
+    from ldap3 import MODIFY_ADD
+    conn.modify("CN=Reza Yazdi,OU=Yazd,OU=Offices,DC=corp,DC=local", {"memberOf": [(MODIFY_ADD, [gdn])]})  # AD does it
+    ldap_ad.sync_users(db, ["reza.y"])
+    ldap_ad.sync_users(db, ["mina.o"])
+    db.expire_all()
+    # reza is in the Yazd OU (priority 10) and in Net-Staff of the Tehran group (20): the Yazd group wins
+    assert db.query(User).filter_by(username="reza.y").one().group.name == "اینترنت یزد"
+    assert db.query(User).filter_by(username="mina.o").one().group.name == "اینترنت تهران"
+    set_setting(db, "ldap_server", "")
+    set_setting(db, "public_hosts", "")
+    db.commit()
+    db.close()

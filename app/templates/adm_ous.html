@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import ou_select with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><h3>OU جدید</h3><form method="post" action="/adm/ous/op" class="filters"><input type="hidden" name="op" value="create">
+<div><label>زیرمجموعهٔ</label>{{ ou_select('parent', ous, '', 'ریشهٔ دامین') }}</div>
+<div><label>نام</label><input name="name" required></div><div><label>توضیح</label><input name="description"></div>
+<div><button class="btn p">ساخت</button></div></form>
+<p class="hint">OUهایی که در ویندوز «Protect from accidental deletion» دارند از اینجا حذف نمی‌شوند. OU فقط وقتی خالی است حذف می‌شود.</p></div>
+<div class="card tbl"><table><tr><th>OU</th><th>DN</th><th></th></tr>
+<tr><td><b>{{ base }}</b></td><td></td><td></td></tr>
+{% for dn, n, depth in ous %}<tr><td style="padding-right:{{ 12 + depth * 22 }}px">{{ n }}</td><td class="hint ltr">{{ dn }}</td>
+<td style="white-space:nowrap"><a class="btn s" href="/adm/users?ou={{ dn|urlencode }}">کاربران</a> <a class="btn s" href="/adm/groups?ou={{ dn|urlencode }}">گروه‌ها</a>
+{% if dn.upper().startswith('OU=') %}<form method="post" action="/adm/ous/op" style="display:inline" onsubmit="return confirm('حذف OU {{ n }}؟')"><input type="hidden" name="op" value="delete"><input type="hidden" name="dn" value="{{ dn }}"><button class="btn s d">حذف</button></form>{% endif %}</td></tr>
+{% endfor %}</table></div>
+{% endblock %}

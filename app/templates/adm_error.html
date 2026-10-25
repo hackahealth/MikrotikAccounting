@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+{% set tab = tab or 'users' %}{% include "_adm_tabs.html" %}
+<div class="flash err">اتصال به Active Directory ممکن نشد: <span class="ltr">{{ error }}</span></div>
+<div class="card"><p>تنظیمات اتصال (سرور، حساب سرویس و رمز آن) را در صفحهٔ <a href="/ad">Active Directory</a> بررسی کنید.
+حساب سرویس برای ساخت و ویرایش باید در AD دسترسی لازم را داشته باشد (Delegate Control روی OUها یا عضویت در Account Operators).
+تعیین رمز کاربران فقط روی اتصال رمزشده (LDAPS روی 636 یا StartTLS) ممکن است.</p></div>
+{% endblock %}

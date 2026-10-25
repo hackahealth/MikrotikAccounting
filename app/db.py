@@ -67,8 +67,29 @@ class Group(Base):
     allow_hotspot = Column(Boolean, default=True)
     allow_vpn = Column(Boolean, default=True)
     address_list = Column(String(100), default="")        # MikroTik address-list name for firewall/mangle
-    ldap_group_dn = Column(String(500), default="")       # AD group mapped to this group
+    ldap_group_dn = Column(String(500), default="")       # AD group mapped to this group (the one written on changes)
+    ldap_groups = Column(Text, default="")                # more AD group DNs, one per line
+    ldap_ous = Column(Text, default="")                   # AD OUs (users anywhere under them), one DN per line
+    ldap_offices = Column(Text, default="")               # AD office (physicalDeliveryOfficeName) values / panel offices
+    ldap_priority = Column(Integer, default=100)          # several groups match a user: the lowest number wins
     users = relationship("User", back_populates="group")
+
+    @staticmethod
+    def _lines(v):
+        return [x.strip() for x in str(v or "").replace("\r", "").split("\n") if x.strip()]
+
+    def ad_dns(self):
+        out = [self.ldap_group_dn.strip()] if (self.ldap_group_dn or "").strip() else []
+        return out + [x for x in self._lines(self.ldap_groups) if x.lower() not in {o.lower() for o in out}]
+
+    def ad_ous(self):
+        return self._lines(self.ldap_ous)
+
+    def ad_offices(self):
+        return self._lines(self.ldap_offices)
+
+    def ad_mapped(self):
+        return bool(self.ad_dns() or self.ad_ous() or self.ad_offices())
 
 
 class Office(Base):

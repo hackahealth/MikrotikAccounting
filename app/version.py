@@ -1,1 +1,1 @@
-VERSION = "1.16.0"     # 2026-10-24: WAN check, ping-verified online, access control on routers, Windows logons and messages
+VERSION = "1.17.0"     # 2026-10-25: Active Directory administration (internal address only), groups mapped to AD groups / OUs / offices

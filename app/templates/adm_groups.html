@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import ou_select with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<div class="card"><form class="filters" method="get">
+  <div><label>نام گروه</label><input name="q" value="{{ q }}"></div>
+  <div><label>OU</label>{{ ou_select('ou', ous, ou, 'همه') }}</div>
+  <div><button class="btn p">نمایش</button></div></form></div>
+<details class="card"><summary><b>گروه جدید در AD</b></summary>
+<form method="post" action="/adm/groups/create"><div class="grid g3">
+  <div class="fg"><label>OU</label>{{ ou_select('ou', ous, ou, 'CN=Users (پیش‌فرض)') }}</div>
+  <div class="fg"><label>نام گروه</label><input name="name" required maxlength="64"></div>
+  <div class="fg"><label>توضیح</label><input name="description"></div>
+  <div class="fg"><label>دامنه (scope)</label><select name="scope">{% for k, v in scopes.items() %}<option value="{{ k }}">{{ v[0] }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>نوع</label><select name="type"><option value="security">امنیتی (Security) — برای دسترسی‌ها</option><option value="distribution">توزیع (Distribution) — برای ایمیل</option></select></div>
+</div><button class="btn p">ساخت گروه</button></form></details>
+<div class="card tbl"><table><tr><th>گروه</th><th>توضیح</th><th>نوع</th><th>OU</th><th>اعضا</th></tr>
+{% for g in groups %}<tr><td><a href="/adm/group?dn={{ g.dn|urlencode }}">{{ g.name }}</a></td><td>{{ g.description }}</td>
+<td class="hint">{{ 'امنیتی' if g.security else 'توزیع' }}{% if g.scope %} · {{ scopes[g.scope][0] }}{% endif %}</td>
+<td class="hint ltr">{{ g.ou.split(',')[0].split('=')[-1] }}</td><td>{{ g.members|length }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">گروهی پیدا نشد</td></tr>{% endfor %}</table></div>
+{% endblock %}
