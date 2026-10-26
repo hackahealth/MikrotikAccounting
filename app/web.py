@@ -24,7 +24,7 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (access, ad_admin, alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+from . import (access, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
@@ -124,7 +124,7 @@ async def _auth(request, call_next):
     request.state.internal = internal
     if not internal:
         perms = perms - auth.INTERNAL_ONLY
-        if path == "/adm" or path.startswith("/adm/"):
+        if path in ("/adm", "/isx") or path.startswith(("/adm/", "/isx/")):
             db.commit()
             return Response("Not Found", status_code=404, media_type="text/plain")
     request.state.me, request.state.perms = me, perms
@@ -1726,7 +1726,9 @@ def _pbx_page(request, edit=None):
                   pbx_names=_pbx_names(db), offices=db.query(Office).order_by(Office.name).all(),
                   calls_count={i: n for i, n in db.query(Call.pbx_id, func.count(Call.id)).group_by(Call.pbx_id)},
                   today=jalali.to_jalali_str(now().date()), ad_suggest=pbx.ad_suggestions(db),
-                  sl_seconds=pbx.sl_seconds(db), missed_alert=get_setting(db, "pbx_missed_alert", "0"))
+                  sl_seconds=pbx.sl_seconds(db), missed_alert=get_setting(db, "pbx_missed_alert", "0"),
+                  cert_fp=request.session.pop("pbx_cert_fp", None),
+                  cert_now=pbxapi.fingerprint(edit.api_cert) if edit is not None and edit.api_cert else "")
 
 
 @app.post("/pbx/settings")
@@ -1844,6 +1846,13 @@ async def pbx_save(request: Request):
     s.ami_user = str(form.get("ami_user", "")).strip()[:100]
     if form.get("ami_password"):
         s.ami_password_enc = encrypt(str(form.get("ami_password")))
+    new_api = str(form.get("api_url", "")).strip()[:200]
+    if new_api != (s.api_url or "") or str(form.get("host", "")).strip() != (s.host or ""):
+        s.api_cert = ""                     # another address: the pinned certificate no longer applies
+    s.api_url = new_api
+    s.api_user = str(form.get("api_user", "")).strip()[:100]
+    if form.get("api_password"):
+        s.api_password_enc = encrypt(str(form.get("api_password")))
     if not s.name or not s.host:
         flash(request, "نام و آدرس سرور الزامی است", "err")
         return redirect(f"/pbx/{sid}/edit" if sid else "/pbx/new")
@@ -1859,6 +1868,36 @@ async def pbx_save(request: Request):
         ok, msg = ok and ok2, msg + " " + msg2
     flash(request, ("ذخیره شد. " + msg) if ok else ("ذخیره شد ولی " + msg), "ok" if ok else "err")
     return redirect("/pbx")
+
+
+@app.post("/pbx/{sid}/api-cert")
+async def pbx_api_cert(request: Request, sid: int):
+    """Pin the Issabel web certificate: first fetch shows its fingerprint, confirming stores it."""
+    form = await request.form()
+    db = SessionLocal()
+    s = db.get(PbxServer, sid)
+    if s is None:
+        return redirect("/pbx")
+    try:
+        pem, fp = pbxapi.fetch_certificate(s)
+    except pbxapi.PbxApiError as e:
+        flash(request, str(e), "err")
+        return redirect(f"/pbx/{sid}/edit#api")
+    if form.get("op") == "confirm":
+        if form.get("fp") != fp:
+            flash(request, "گواهی سرور با گواهیِ تأییدشده یکی نیست؛ دوباره بررسی کنید", "err")
+            return redirect(f"/pbx/{sid}/edit#api")
+        s.api_cert = pem
+        db.commit()
+        log_action(request, "ثبت گواهی API ایزابل", f"{s.name} {fp}")
+        try:
+            n = len(pbxapi.Client(s).controllers())
+            flash(request, f"گواهی ثبت شد و ورود به API موفق بود ({n} بخش در دسترس)")
+        except pbxapi.PbxApiError as e:
+            flash(request, f"گواهی ثبت شد ولی: {e}", "err")
+        return redirect(f"/pbx/{sid}/edit#api")
+    request.session["pbx_cert_fp"] = [sid, fp]
+    return redirect(f"/pbx/{sid}/edit#api")
 
 
 @app.post("/pbx/{sid}/test")
@@ -3688,10 +3727,20 @@ def _back(form, default):
     return _local(form.get("back"), default)
 
 
-def _adm_choices():
+def _adm_choices(isx=False):
     db = SessionLocal()
-    return {"choices": ad_admin.choices(db), "free_exts": pbx.free_extensions(db),
-            "bulk_attrs": ad_admin.BULK_ATTRS}
+    out = {"choices": ad_admin.choices(db), "free_exts": pbx.free_extensions(db), "bulk_attrs": ad_admin.BULK_ATTRS,
+           "isx_servers": []}
+    if isx:     # Issabel servers managed through the API, with the numbers still free on each
+        for srv in db.query(PbxServer).order_by(PbxServer.name):
+            if pbxapi.enabled(srv):
+                try:
+                    free = pbxapi.free_numbers(pbxapi.used_numbers(pbxapi.Client(srv)), pbx.parse_ranges(srv.ext_ranges))
+                    err = ""
+                except pbxapi.PbxApiError as e:
+                    free, err = [], str(e)
+                out["isx_servers"].append({"id": srv.id, "name": srv.name, "free": free, "error": err})
+    return out
 
 
 def _adm_sync_many(db, sams):
@@ -3823,7 +3872,7 @@ def adm_users(request: Request, q: str = "", ou: str = ""):
     except Exception as e:
         return render(request, "adm_error.html", error=str(e))
     return render(request, "adm_users.html", users=users, ous=ous, groups=groups, q=q, ou=ou, tab="users",
-                  editable=ad_admin.EDITABLE, **_adm_choices())
+                  editable=ad_admin.EDITABLE, **_adm_choices(isx=True))
 
 
 @app.get("/adm/user", response_class=HTMLResponse)
@@ -3842,20 +3891,42 @@ async def adm_user_create(request: Request):
     form = await request.form()
     db = SessionLocal()
     pw = str(form.get("password", ""))
+    sam = str(form.get("sam", "")).strip()
+    isx_srv = db.get(PbxServer, _int(form.get("isx_sid"))) if form.get("isx_sid") else None
+    isx_ext = str(form.get("isx_ext", "")).strip()
+    if isx_srv is not None and not re.fullmatch(r"\d{2,7}", isx_ext):
+        flash(request, "شمارهٔ داخلی جدید را درست وارد کنید", "err")
+        return redirect("/adm/users")
+    attrs = {k: str(form.get(k, "")).strip() for k, _ in ad_admin.EDITABLE if k not in ("givenName", "sn", "displayName")}
+    if isx_srv is not None:
+        attrs["ipPhone"] = isx_ext
     try:
         with _adm(request, secure=bool(pw)) as ad:
-            dn = ad.create_user(str(form.get("ou", "")), str(form.get("sam", "")), str(form.get("given", "")).strip(),
+            dn = ad.create_user(str(form.get("ou", "")), sam, str(form.get("given", "")).strip(),
                                 str(form.get("sn", "")).strip(), str(form.get("display", "")),
-                                pw, _bool(form, "must_change"), _bool(form, "enabled"),
-                                {k: str(form.get(k, "")).strip() for k, _ in ad_admin.EDITABLE
-                                 if k not in ("givenName", "sn", "displayName")},
-                                form.getlist("groups"))
+                                pw, _bool(form, "must_change"), _bool(form, "enabled"), attrs, form.getlist("groups"))
+            display = ad.user(dn)["name"]
     except Exception as e:
         return _adm_error(request, e, "/adm/users")
-    sam = str(form.get("sam", "")).strip()
     log_action(request, "AD: ساخت کاربر", f"{sam} — {dn}")
     _adm_sync(db, sam)
-    flash(request, f"کاربر {sam} در AD ساخته شد" + ("" if pw else " (بدون رمز و غیرفعال؛ رمز را تعیین و فعال کنید)"))
+    msg = f"کاربر {sam} در AD ساخته شد" + ("" if pw else " (بدون رمز و غیرفعال؛ رمز را تعیین و فعال کنید)")
+    level = "ok"
+    if isx_srv is not None:
+        sip_secret = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789") for _ in range(12))
+        try:
+            pbxapi.Client(isx_srv).create("extensions", {"name": display, "secret": sip_secret}, isx_ext)
+            user = db.query(User).filter(func.lower(User.username) == sam.lower()).first()
+            if user is not None:
+                db.add(ExtensionAssignment(user_id=user.id, pbx_id=isx_srv.id, extension=isx_ext, start=now().date(),
+                                           note="ساخته‌شده با کاربر AD"))
+                db.commit()
+            log_action(request, "ایزابل: ساخت داخلی", f"{isx_srv.name}: {isx_ext} برای {sam}")
+            msg += f"\nداخلی {isx_ext} در {isx_srv.name} ساخته شد؛ رمز SIP تلفن: {sip_secret}"
+        except pbxapi.PbxApiError as e:
+            msg += f"\nساخت داخلی {isx_ext} در ایزابل ناموفق بود: {e}"
+            level = "err"
+    flash(request, msg, level)
     return redirect("/adm/user?dn=" + quote(dn))
 
 
@@ -4056,3 +4127,209 @@ async def adm_computer_op(request: Request):
     log_action(request, f"AD: رایانه {op}", ldap_ad._cn(dn))
     flash(request, "انجام شد")
     return redirect(back)
+
+
+# ------------------------------------------------------------------ Issabel administration through its API (internal only)
+_SECRET_KEYS = ("secret", "password", "pin", "pass")
+
+
+def _isx_server(db, sid):
+    servers = [s for s in db.query(PbxServer).order_by(PbxServer.name) if pbxapi.enabled(s)]
+    s = next((x for x in servers if x.id == sid), servers[0] if servers else None)
+    return s, servers
+
+
+def _isx_resource(res):
+    if not re.fullmatch(r"[a-z_]{2,40}", res or "") or res in ("authenticate", "help"):
+        raise pbxapi.PbxApiError("بخش نادرست است")
+    return res
+
+
+def _isx_tabs(client):
+    try:
+        avail = [c for c in client.controllers() if c not in ("authenticate", "help")]
+    except pbxapi.PbxApiError:
+        raise
+    known = [r for r in pbxapi.RESOURCES if r in avail]
+    return known + sorted(c for c in avail if c not in pbxapi.RESOURCES)
+
+
+def _isx_render(request, name, **ctx):
+    ctx.setdefault("labels", {k: v[0] for k, v in pbxapi.RESOURCES.items()})
+    ctx.setdefault("field_fa", pbxapi.FIELD_FA)
+    return render(request, name, **ctx)
+
+
+@app.get("/isx", response_class=HTMLResponse)
+def isx_home(request: Request, sid: int = 0):
+    db = SessionLocal()
+    s, servers = _isx_server(db, sid)
+    if s is None:
+        return _isx_render(request, "isx_error.html", error="برای هیچ سرور ایزابلی API تنظیم نشده است. در صفحهٔ «سرورهای ایزابل»، "
+                           "بخش «مدیریت ایزابل از سامانه» کاربر و رمز ادمین وب ایزابل را وارد و گواهی را ثبت کنید.",
+                           servers=servers, s=None, tabs=[], res="")
+    return redirect(f"/isx/extensions?sid={s.id}")
+
+
+@app.get("/isx/{res}", response_class=HTMLResponse)
+def isx_list(request: Request, res: str, sid: int = 0, q: str = ""):
+    db = SessionLocal()
+    s, servers = _isx_server(db, sid)
+    if s is None:
+        return redirect("/isx")
+    try:
+        _isx_resource(res)
+        client = pbxapi.Client(s)
+        tabs = _isx_tabs(client)
+        rows = client.list(res)
+    except pbxapi.PbxApiError as e:
+        return _isx_render(request, "isx_error.html", error=str(e), servers=servers, s=s, tabs=[], res=res)
+    idkey = pbxapi.RESOURCES.get(res, ("", "id", []))[1]
+    cols = [idkey, "name"] + [c for c in pbxapi.RESOURCES.get(res, ("", "", []))[2] if c not in (idkey, "name")]
+    for r in rows[:50]:
+        for k in r:
+            if k not in cols and len(cols) < 7 and not isinstance(r[k], (dict, list)):
+                cols.append(k)
+    if q.strip():
+        x = q.strip().lower()
+        rows = [r for r in rows if x in json.dumps(r, ensure_ascii=False).lower()]
+    try:
+        rows.sort(key=lambda r: (len(pbxapi.row_id(res, r)), pbxapi.row_id(res, r)))
+    except TypeError:
+        pass
+    return _isx_render(request, "isx_list.html", servers=servers, s=s, tabs=tabs, res=res, rows=rows, cols=cols, q=q,
+                       row_id=pbxapi.row_id, secret_keys=_SECRET_KEYS)
+
+
+def _isx_fields(rec):
+    """Flattened fields for the form: [(key, value text, kind)] kind = list|secret|dest|text."""
+    out = []
+    for k, v in sorted(pbxapi.flatten(rec).items()):
+        last = k.rsplit(".", 1)[-1].lower()
+        if isinstance(v, list):
+            out.append((k, ", ".join(str(x) for x in v), "list"))
+        elif any(t in last for t in _SECRET_KEYS):
+            out.append((k, "" if v is None else str(v), "secret"))
+        elif "dest" in last or last.startswith("destination") or last in ("goto", "postdest"):
+            out.append((k, "" if v is None else str(v), "dest"))
+        else:
+            out.append((k, "" if v is None else str(v), "text"))
+    return out
+
+
+@app.get("/isx/{res}/edit", response_class=HTMLResponse)
+def isx_edit(request: Request, res: str, sid: int = 0, id: str = ""):
+    db = SessionLocal()
+    s, servers = _isx_server(db, sid)
+    if s is None:
+        return redirect("/isx")
+    try:
+        _isx_resource(res)
+        client = pbxapi.Client(s)
+        tabs = _isx_tabs(client)
+        rec = client.get(res, id)
+        dests = pbxapi.destinations(client, set(tabs))
+    except pbxapi.PbxApiError as e:
+        return _isx_render(request, "isx_error.html", error=str(e), servers=servers, s=s, tabs=[], res=res)
+    return _isx_render(request, "isx_edit.html", servers=servers, s=s, tabs=tabs, res=res, rid=id,
+                       fields=_isx_fields(rec), dests=dests, new=False)
+
+
+@app.get("/isx/{res}/new", response_class=HTMLResponse)
+def isx_new(request: Request, res: str, sid: int = 0):
+    db = SessionLocal()
+    s, servers = _isx_server(db, sid)
+    if s is None:
+        return redirect("/isx")
+    try:
+        _isx_resource(res)
+        client = pbxapi.Client(s)
+        tabs = _isx_tabs(client)
+        rows = client.list(res)
+        sample = client.get(res, pbxapi.row_id(res, rows[0])) if rows else {"name": ""}
+        dests = pbxapi.destinations(client, set(tabs))
+        free = pbxapi.free_numbers(pbxapi.used_numbers(client), pbx.parse_ranges(s.ext_ranges)) \
+            if pbxapi.RESOURCES.get(res, ("", "id"))[1] == "extension" else []
+    except pbxapi.PbxApiError as e:
+        return _isx_render(request, "isx_error.html", error=str(e), servers=servers, s=s, tabs=[], res=res)
+    idkey = pbxapi.RESOURCES.get(res, ("", "id"))[1]
+    fields = [(k, "", kind) for k, v, kind in _isx_fields(sample) if k not in ("id", idkey, "dial")]
+    return _isx_render(request, "isx_edit.html", servers=servers, s=s, tabs=tabs, res=res, rid="", fields=fields,
+                       dests=dests, new=True, free=free, idkey=idkey)
+
+
+def _isx_value(form, k):
+    v = str(form.get("f__" + k, ""))
+    if form.get("t__" + k) == "list":
+        return [x for x in re.split(r"[\s,;]+", v) if x]
+    return v.strip()
+
+
+@app.post("/isx/{res}/save")
+async def isx_save(request: Request, res: str):
+    form = await request.form()
+    db = SessionLocal()
+    sid = _int(form.get("sid"))
+    s, _ = _isx_server(db, sid)
+    rid = str(form.get("id", "")).strip()
+    back = f"/isx/{res}/edit?sid={sid}&id={quote(rid)}" if rid else f"/isx/{res}/new?sid={sid}"
+    if s is None:
+        return redirect("/isx")
+    keys = [k[3:] for k in form.keys() if k.startswith("f__")]
+    flat = {}
+    for k in keys:
+        v = _isx_value(form, k)
+        if rid:
+            if form.get("t__" + k) == "list":
+                if v != [x for x in re.split(r"[\s,;]+", str(form.get("o__" + k, ""))) if x]:
+                    flat[k] = v
+            elif v != str(form.get("o__" + k, "")).strip():
+                flat[k] = v
+        elif v not in ("", []):
+            flat[k] = v
+    for line in str(form.get("extra", "")).splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            if k.strip():
+                flat[k.strip()] = v.strip()
+    try:
+        _isx_resource(res)
+        client = pbxapi.Client(s)
+        if rid:
+            if not flat:
+                flash(request, "تغییری نبود")
+                return redirect(back)
+            client.update(res, rid, pbxapi.unflatten(flat))
+            msg, what = "ذخیره شد و ایزابل تنظیمات را اعمال کرد", f"ویرایش {res} {rid}: {', '.join(flat)}"
+        else:
+            rid = client.create(res, pbxapi.unflatten(flat), str(form.get("new_id", "")).strip())
+            msg, what = f"ساخته شد{(' (' + rid + ')') if rid else ''}", f"ساخت {res} {rid}"
+    except pbxapi.PbxApiError as e:
+        flash(request, f"ایزابل نپذیرفت: {e}", "err")
+        return redirect(back)
+    log_action(request, "ایزابل: " + what[:60], f"{s.name}: {what}"[:900])
+    flash(request, msg)
+    return redirect(f"/isx/{res}/edit?sid={s.id}&id={quote(rid)}" if rid else f"/isx/{res}?sid={s.id}")
+
+
+@app.post("/isx/{res}/delete")
+async def isx_delete(request: Request, res: str):
+    form = await request.form()
+    db = SessionLocal()
+    sid = _int(form.get("sid"))
+    s, _ = _isx_server(db, sid)
+    rid = str(form.get("id", "")).strip()
+    if s is None:
+        return redirect("/isx")
+    if form.get("confirm", "").strip() != rid:
+        flash(request, "برای حذف، شناسه را دقیق در کادر تأیید بنویسید", "err")
+        return redirect(f"/isx/{res}/edit?sid={sid}&id={quote(rid)}")
+    try:
+        _isx_resource(res)
+        pbxapi.Client(s).delete(res, rid)
+    except pbxapi.PbxApiError as e:
+        flash(request, f"ایزابل نپذیرفت: {e}", "err")
+        return redirect(f"/isx/{res}/edit?sid={sid}&id={quote(rid)}")
+    log_action(request, f"ایزابل: حذف {res}", f"{s.name}: {rid}")
+    flash(request, f"{rid} حذف شد")
+    return redirect(f"/isx/{res}?sid={s.id}")

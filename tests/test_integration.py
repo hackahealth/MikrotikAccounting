@@ -1,4 +1,5 @@
 """End-to-end: RADIUS auth (PAP/CHAP/MS-CHAPv2) + accounting + NetFlow + web pages."""
+import json
 import hashlib
 import os
 import socket
@@ -2476,3 +2477,177 @@ def test_ad_administration_internal_only_and_group_mapping(env, monkeypatch):
     set_setting(db, "public_hosts", "")
     db.commit()
     db.close()
+
+
+class _FakeIssabel:
+    """A tiny pbxapi: authenticate, controllers list, and REST on extensions / queues."""
+    def __init__(self):
+        import http.server
+        import threading as _t
+        self.data = {"extensions": {"1001": {"extension": "1001", "name": "Ali", "secret": "s1", "tech": "sip",
+                                             "voicemail": {"enabled": "novm"}}},
+                     "queues": {"2000": {"extension": "2000", "name": "Sales", "strategy": "ringall",
+                                         "destination_if_no_answer": "app-blackhole,hangup,1"}}}
+        self.calls = []
+        fake = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, body=None, headers=None):
+                self.send_response(code)
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                if body is not None:
+                    self.wfile.write(json.dumps(body).encode())
+
+            def _body(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(n).decode() if n else ""
+                return raw
+
+            def _auth(self):
+                return self.headers.get("Authorization") == "Bearer TOK"
+
+            def _route(self, method):
+                from urllib.parse import parse_qs, urlparse
+                u = urlparse(self.path)
+                parts = [p for p in u.path.split("/") if p][1:]      # after /pbxapi
+                body = self._body()
+                fake.calls.append((method, "/".join(parts), body))
+                if parts == ["authenticate"] and method == "POST":
+                    q = parse_qs(body)
+                    if q.get("user") == ["admin"] and q.get("password") == ["IssPass1"]:
+                        return self._send(200, {"access_token": "TOK", "token_type": "Bearer"})
+                    return self._send(403)
+                if not self._auth():
+                    return self._send(403)
+                if not parts:
+                    return self._send(200, {"controllers": ["authenticate", "extensions", "queues", "trunks"]})
+                res, rid = parts[0], (parts[1] if len(parts) > 1 else "")
+                store = fake.data.setdefault(res, {})
+                if method == "GET":
+                    if rid:
+                        return self._send(200, {"status": "success", "results": [store[rid]]} if rid in store else
+                                          {"status": "success", "results": []})
+                    return self._send(200, {"status": "success", "results": list(store.values())})
+                if method in ("PUT", "POST"):
+                    d = json.loads(body or "{}")
+                    if not rid:
+                        rid = str(max([int(k) for k in store] or [100]) + 1)
+                    rec = store.setdefault(rid, {"extension": rid})
+                    for k, v in d.items():
+                        if isinstance(v, dict):
+                            rec.setdefault(k, {}).update(v)
+                        else:
+                            rec[k] = v
+                    return self._send(201 if method == "POST" else 200, None,
+                                      {"Location": f"http://x/pbxapi/{res}/{rid}"})
+                if method == "DELETE":
+                    store.pop(rid, None)
+                    return self._send(200)
+                return self._send(405)
+
+            def do_GET(self):
+                self._route("GET")
+
+            def do_POST(self):
+                self._route("POST")
+
+            def do_PUT(self):
+                self._route("PUT")
+
+            def do_DELETE(self):
+                self._route("DELETE")
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.srv.server_address[1]
+        _t.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+
+def test_issabel_administration_through_api(env, monkeypatch):
+    from app import pbxapi
+    from app.db import ExtensionAssignment, PbxServer
+    from app.web import app
+    fake = _FakeIssabel()
+    db = SessionLocal()
+    srv = PbxServer(name="Issabel-HQ", host="127.0.0.1", db_user="", ext_ranges="1000-1099",
+                    api_url=f"http://127.0.0.1:{fake.port}/pbxapi", api_user="admin", api_password_enc=encrypt("IssPass1"),
+                    enabled=False)
+    db.add(srv)
+    db.commit()
+    sid = srv.id
+    c_ = pbxapi.Client(srv)
+    assert "queues" in c_.controllers()
+    assert pbxapi.free_numbers(pbxapi.used_numbers(c_), [(1000, 1099)], 3) == ["1000", "1002", "1003"]
+    assert pbxapi.flatten({"a": {"b": 1}, "l": [1]}) == {"a.b": 1, "l": [1]}
+    assert pbxapi.unflatten({"a.b": 1, "c": 2}) == {"a": {"b": 1}, "c": 2}
+    with TestClient(app, client=("8.8.8.8", 4000)) as c:
+        _login(c, "admin", "Secret12345")
+        assert c.get("/isx/extensions").status_code == 404                  # outside: not there
+    with TestClient(app, client=("192.168.1.20", 4000), headers={"host": "192.168.1.5:9090"}) as c:
+        _login(c, "admin", "Secret12345")
+        assert "مدیریت ایزابل" in c.get("/").text
+        r = c.get(f"/isx/extensions?sid={sid}")
+        assert r.status_code == 200 and "Ali" in r.text and "s1" not in r.text and "صف‌ها" in r.text
+        r = c.get(f"/isx/queues/edit?sid={sid}&id=2000")
+        assert 'name="f__destination_if_no_answer"' in r.text and "from-did-direct,1001,1" in r.text
+        r = c.post("/isx/queues/save", data={"sid": sid, "id": "2000", "f__name": "Sales2", "o__name": "Sales",
+                                             "t__name": "text", "f__strategy": "ringall", "o__strategy": "ringall",
+                                             "t__strategy": "text"})
+        assert "ذخیره شد" in r.text
+        assert [x for x in fake.calls if x[0] == "PUT"][-1] == ("PUT", "queues/2000", '{"name": "Sales2"}')
+        r = c.get(f"/isx/extensions/edit?sid={sid}&id=1001")
+        assert 'name="f__voicemail.enabled"' in r.text and 'type="password" name="f__secret"' in r.text
+        c.post("/isx/extensions/save", data={"sid": sid, "id": "1001", "f__voicemail.enabled": "default",
+                                             "o__voicemail.enabled": "novm", "t__voicemail.enabled": "text"})
+        assert fake.data["extensions"]["1001"]["voicemail"] == {"enabled": "default"}
+        r = c.get(f"/isx/extensions/new?sid={sid}")
+        assert r.status_code == 200 and "1000" in r.text
+        r = c.post("/isx/extensions/save", data={"sid": sid, "new_id": "1050", "f__name": "Neda", "t__name": "text",
+                                                 "f__secret": "Xx123456", "t__secret": "secret"})
+        assert fake.data["extensions"]["1050"]["name"] == "Neda" and "ساخته شد" in r.text
+        r = c.post("/isx/extensions/delete", data={"sid": sid, "id": "1050", "confirm": "nope"})
+        assert "1050" in fake.data["extensions"]
+        c.post("/isx/extensions/delete", data={"sid": sid, "id": "1050", "confirm": "1050"})
+        assert "1050" not in fake.data["extensions"]
+        # a wrong password is reported, not a crash
+        db.expire_all()
+        s2 = db.get(PbxServer, sid)
+        s2.api_password_enc = encrypt("bad")
+        db.commit()
+        pbxapi._tokens.clear()
+        r = c.get(f"/isx/extensions?sid={sid}")
+        assert "ورود به API ایزابل ناموفق بود" in r.text
+        s2.api_password_enc = encrypt("IssPass1")
+        db.commit()
+        pbxapi._tokens.clear()
+        # new AD user with a new Issabel extension
+        from app import ldap_ad
+        from app.db import set_setting
+        conn = _mock_ad([("DC=corp,DC=local", {"objectClass": ["domain"], "dc": "corp"}),
+                         ("CN=Users,DC=corp,DC=local", {"objectClass": ["container"], "cn": "Users"})])
+        conn.unbind = lambda: None
+        monkeypatch.setattr(ldap_ad, "_connect", lambda cfg, timeout=30: conn)
+        for k, v in {"ldap_server": "dc1", "ldap_domain": "corp.local", "ldap_bind_user": "svc",
+                     "ldap_base_dn": "DC=corp,DC=local"}.items():
+            set_setting(db, k, v)
+        db.commit()
+        assert "داخلی تلفن جدید در ایزابل" in c.get("/adm/users").text
+        r = c.post("/adm/users/create", data={"sam": "hasan.k", "given": "Hasan", "sn": "K", "isx_sid": sid,
+                                               "isx_ext": "1060", "enabled": "1"})
+        assert "داخلی 1060 در Issabel-HQ ساخته شد" in r.text, r.text[:2000]
+        assert fake.data["extensions"]["1060"]["name"] == "Hasan K" and len(fake.data["extensions"]["1060"]["secret"]) == 12
+        rows = conn.extend.standard.paged_search("DC=corp,DC=local", "(sAMAccountName=hasan.k)", attributes=["ipPhone"],
+                                                 generator=False)
+        assert [e for e in rows if e.get("type") == "searchResEntry"][0]["attributes"]["ipPhone"] in ("1060", ["1060"])
+        set_setting(db, "ldap_server", "")
+        db.commit()
+    db.delete(db.get(PbxServer, sid))
+    db.query(ExtensionAssignment).filter(ExtensionAssignment.pbx_id == sid).delete()
+    db.commit()
+    db.close()
+    fake.srv.shutdown()

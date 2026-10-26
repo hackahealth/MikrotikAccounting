@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_isx_tabs.html" %}
+<datalist id="dests">{% for d, label in dests %}<option value="{{ d }}">{{ label }}</option>{% endfor %}</datalist>
+<form method="post" action="/isx/{{ res }}/save"><input type="hidden" name="sid" value="{{ s.id }}"><input type="hidden" name="id" value="{{ rid }}">
+<div class="card"><h3>{{ labels.get(res, res) }}: {{ rid if rid else 'مورد جدید' }}</h3>
+{% if new %}<div class="fg"><label>شماره / شناسه {{ '(خالی = اولین شمارهٔ آزاد را خود ایزابل انتخاب می‌کند)' }}</label>
+<input name="new_id" class="ltr" list="freeids" style="max-width:240px"><datalist id="freeids">{% for f in free or [] %}<option value="{{ f }}">{% endfor %}</datalist>
+{% if free %}<div class="hint">آزاد در بازهٔ داخلی‌ها: <span class="ltr">{{ free[:10]|join('، ') }}</span></div>{% endif %}</div>{% endif %}
+<input class="ltr" placeholder="فیلتر فیلدها" style="max-width:300px" oninput="var v=this.value.toLowerCase();document.querySelectorAll('.isxf').forEach(e=>e.style.display=e.dataset.k.includes(v)?'':'none')">
+<div class="grid g3" style="margin-top:10px">{% for k, v, kind in fields %}
+<div class="fg isxf" data-k="{{ k|lower }}"><label>{{ field_fa.get(k, "") }} <span class="ltr hint">{{ k }}</span></label>
+<input type="hidden" name="t__{{ k }}" value="{{ kind }}"><input type="hidden" name="o__{{ k }}" value="{{ v }}">
+{% if kind == 'list' %}<textarea name="f__{{ k }}" rows="2" class="ltr" placeholder="با ویرگول جدا کنید">{{ v }}</textarea>
+{% elif kind == 'secret' %}<div style="display:flex;gap:4px"><input type="password" name="f__{{ k }}" value="{{ v }}" class="ltr" autocomplete="new-password"><button type="button" class="btn s" onclick="var i=this.previousElementSibling;i.type=i.type=='password'?'text':'password'">👁</button></div>
+{% elif kind == 'dest' %}<input name="f__{{ k }}" value="{{ v }}" class="ltr" list="dests">
+{% else %}<input name="f__{{ k }}" value="{{ v }}" class="{{ 'ltr' if k != 'name' }}">{% endif %}</div>{% endfor %}</div>
+<details><summary class="hint">فیلدهای دیگر (پیشرفته)</summary><textarea name="extra" rows="3" class="ltr" placeholder="field=value (هر خط یکی)"></textarea></details>
+<button class="btn p">{{ 'ساخت در ایزابل' if new else 'ذخیره در ایزابل' }}</button> <a class="btn" href="/isx/{{ res }}?sid={{ s.id }}">بازگشت</a>
+<p class="hint">مقصدها (destination) را می‌توانید از فهرست انتخاب کنید؛ فرمت ایزابل: <span class="ltr">context,exten,priority</span>.</p>
+</div></form>
+{% if not new %}<div class="card"><h3>حذف</h3><form method="post" action="/isx/{{ res }}/delete"><input type="hidden" name="sid" value="{{ s.id }}"><input type="hidden" name="id" value="{{ rid }}">
+<div class="fg"><label>برای تأیید، شناسه را بنویسید</label><input name="confirm" class="ltr" placeholder="{{ rid }}" style="max-width:240px"></div>
+<button class="btn d">حذف از ایزابل</button></form></div>{% endif %}
+{% endblock %}

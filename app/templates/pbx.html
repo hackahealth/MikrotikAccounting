@@ -37,9 +37,24 @@
   <div class="fg"><label>کاربر AMI (خالی = خاموش)</label><input name="ami_user" class="ltr" value="{{ edit.ami_user or '' }}" placeholder="acct_live"></div>
   <div class="fg"><label>رمز AMI {{ '(خالی = بدون تغییر)' if edit.id }}</label><input name="ami_password" type="password" class="ltr" autocomplete="new-password"></div>
 </div>
+<h4 id="api">مدیریت ایزابل از سامانه (REST API، اختیاری)</h4>
+<div class="grid g3">
+  <div class="fg"><label>آدرس API (خالی = https://آدرس سرور/pbxapi)</label><input name="api_url" class="ltr" value="{{ edit.api_url or '' }}" placeholder="https://{{ edit.host or '192.168.10.250' }}/pbxapi"></div>
+  <div class="fg"><label>کاربر ادمین وب ایزابل (خالی = خاموش)</label><input name="api_user" class="ltr" value="{{ edit.api_user or '' }}" placeholder="admin"></div>
+  <div class="fg"><label>رمز {{ '(خالی = بدون تغییر)' if edit.id }}</label><input name="api_password" type="password" class="ltr" autocomplete="new-password"></div>
+</div>
 <label><input type="checkbox" name="enabled" value="1" {{ 'checked' if edit.enabled or not edit.id }}> فعال (هر دقیقه سوابق جدید خوانده شود)</label>
 <div style="margin-top:10px"><button class="btn p">ذخیره و تست اتصال</button> <a class="btn" href="/pbx">انصراف</a></div>
 </form>
+{% if edit.id and edit.api_user %}
+<div class="card"><h4>گواهی HTTPS ایزابل</h4>
+{% if cert_now %}<p>گواهی ثبت‌شده: <span class="ltr hint">{{ cert_now }}</span></p>{% else %}<p class="hint">ایزابل گواهی خودامضا دارد. یک بار گواهی را دریافت کنید و اثر انگشتش را با خروجی این دستور روی ایزابل مقایسه کنید تا فقط همان گواهی پذیرفته شود:</p>
+<div class="code ltr">openssl x509 -in /etc/pki/tls/certs/localhost.crt -noout -fingerprint -sha256</div>{% endif %}
+{% if cert_fp and cert_fp[0] == edit.id %}
+<form method="post" action="/pbx/{{ edit.id }}/api-cert"><input type="hidden" name="op" value="confirm"><input type="hidden" name="fp" value="{{ cert_fp[1] }}">
+<p>اثر انگشت گواهی سرور: <b class="ltr">{{ cert_fp[1] }}</b></p><button class="btn p">با ایزابل یکی است؛ ثبت کن</button></form>
+{% else %}<form method="post" action="/pbx/{{ edit.id }}/api-cert"><button class="btn">{{ 'دریافت دوبارهٔ گواهی' if cert_now else 'دریافت گواهی' }}</button></form>{% endif %}
+</div>{% endif %}
 <h4>آماده‌سازی روی ایزابل (یک بار، با SSH به ایزابل)</h4>
 <p class="hint">۱) کاربر فقط‌خواندنی بسازید (رمز root دیتابیس در <span class="ltr">/etc/issabel.conf</span> با نام mysqlrootpwd است؛ <span class="ltr">APP_IP</span> = IP همین سرور برنامه):</p>
 <div class="code ltr">mysql -u root -p -e "CREATE USER 'acct_reader'@'APP_IP' IDENTIFIED BY 'StrongPass'; GRANT SELECT ON asteriskcdrdb.* TO 'acct_reader'@'APP_IP'; FLUSH PRIVILEGES;"</div>

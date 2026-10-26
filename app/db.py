@@ -331,6 +331,10 @@ class PbxServer(Base):
     ami_port = Column(Integer, default=5038)              # Asterisk Manager Interface (live calls); no user = off
     ami_user = Column(String(100), default="")
     ami_password_enc = Column(Text, default="")
+    api_url = Column(String(200), default="")             # Issabel REST API (pbxapi); empty = https://host/pbxapi
+    api_user = Column(String(100), default="")            # Issabel web admin; empty = administration off
+    api_password_enc = Column(Text, default="")
+    api_cert = Column(Text, default="")                   # pinned self-signed certificate of the Issabel web server
 
 
 class AdChoice(Base):

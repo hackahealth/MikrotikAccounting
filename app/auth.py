@@ -53,10 +53,11 @@ PERMISSIONS = {
     "access_manage": "کنترل دسترسی (سایت‌ها، مقاصد داخلی، استثناها)",
     "ad_message": "ارسال پیام به رایانه‌های کاربران",
     "ad_admin": "مدیریت Active Directory (کاربر، گروه، OU، رایانه) — فقط از آدرس داخلی",
+    "pbx_admin": "مدیریت ایزابل (داخلی، صف، ترانک، مسیرها، IVR ...) — فقط از آدرس داخلی",
 }
 # shown and allowed only when the panel is opened through an internal address (never through the public IP)
-INTERNAL_ONLY = {"ad_admin"}
-INTERNAL_PREFIXES = ("/adm/", "/adm")
+INTERNAL_ONLY = {"ad_admin", "pbx_admin"}
+INTERNAL_PREFIXES = ("/adm/", "/adm", "/isx/", "/isx")
 
 ROLES = {
     "admin": ("مدیر سیستم", list(PERMISSIONS)),
@@ -74,7 +75,7 @@ ROLES = {
 SCOPED_FORBIDDEN = {"users_edit", "groups_edit", "live_disconnect", "devices_edit", "nas_manage", "ad_sync",
                     "ad_manage", "settings", "panel_users", "audit_view", "mt_local", "hotspot_deploy", "org_manage",
                     "devices_view", "logs_view", "pbx_manage", "net_monitor", "alerts_view", "security_manage",
-                    "grants_manage", "data_manage", "router_admin", "access_manage", "ad_message", "ad_admin"}
+                    "grants_manage", "data_manage", "router_admin", "access_manage", "ad_message", "ad_admin", "pbx_admin"}
 
 # (method, path regex, permission | "a|b" any-of | "" = any logged-in user)
 ROUTES = [
@@ -120,6 +121,7 @@ ROUTES = [
     ("GET", r"/winlogons", "devices_view"),
     ("GET", r"/messages", "ad_message"), ("POST", r"/messages/.*", "ad_message"),
     ("GET", r"/adm(/(users|user|groups|group|ous|computers|values))?", "ad_admin"), ("POST", r"/adm/.*", "ad_admin"),
+    ("GET", r"/isx(/[a-z_]+(/(edit|new))?)?", "pbx_admin"), ("POST", r"/isx/.*", "pbx_admin"),
 ]
 _ROUTES = [(m, re.compile(p + r"/?$"), perm) for m, p, perm in ROUTES]
 

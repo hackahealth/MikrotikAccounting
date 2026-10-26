@@ -1,1 +1,1 @@
-VERSION = "1.18.1"     # 2026-10-26: access control no longer re-creates unchanged hotspot bypass bindings (VoIP drops)
+VERSION = "1.19.0"     # 2026-10-26: Issabel administration through pbxapi (internal address only)

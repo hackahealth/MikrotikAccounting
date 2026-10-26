@@ -23,6 +23,10 @@
 <div class="fg"><label>عضو این گروه‌ها شود</label>
 <select name="groups" multiple size="8">{% for g in groups %}<option value="{{ g.dn }}">{{ g.name }}{% if g.description %} — {{ g.description }}{% endif %}</option>{% endfor %}</select>
 <div class="hint">با Ctrl چند گروه را انتخاب کنید.</div></div>
+{% if isx_servers %}<div class="fg" style="border-top:1px solid var(--line);padding-top:10px"><label>داخلی تلفن جدید در ایزابل (اختیاری)</label>
+<div class="filters"><div><select name="isx_sid" onchange="document.getElementById('isxext').style.display=this.value?'':'none'"><option value="">نسازد</option>{% for x in isx_servers %}<option value="{{ x.id }}">{{ x.name }}</option>{% endfor %}</select></div>
+<div id="isxext" style="display:none"><input name="isx_ext" class="ltr" list="isxfree" placeholder="شمارهٔ داخلی"><datalist id="isxfree">{% for x in isx_servers %}{% for f in x.free %}<option value="{{ f }}">{{ x.name }}</option>{% endfor %}{% endfor %}</datalist></div></div>
+<div class="hint">داخلی با نام کاربر و یک رمز SIP تصادفی در ایزابل ساخته، در ipPhone کاربر AD ثبت و به نام کاربر در سامانه تخصیص داده می‌شود. شماره‌های آزاد: {% for x in isx_servers %}{{ x.name }}: <span class="ltr">{{ x.free[:8]|join('، ') or x.error }}</span> {% endfor %}</div></div>{% endif %}
 <button class="btn p">ساخت کاربر</button>
 <p class="hint">مقادیر سمت، واحد، دفتر، شهر و شرکت از «مقادیر انتخابی» می‌آیند؛ داخلی‌ها از داخلی‌های ایزابل که به کسی داده نشده‌اند.</p>
 <p class="hint">بدون رمز، حساب غیرفعال ساخته می‌شود. رمز فقط روی اتصال رمزشده (LDAPS یا StartTLS) فرستاده می‌شود.</p>

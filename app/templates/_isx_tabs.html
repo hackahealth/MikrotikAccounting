@@ -1,0 +1,4 @@
+<div class="top"><h2>مدیریت ایزابل</h2>
+{% if servers|length > 1 %}<form method="get" action="/isx/{{ res or 'extensions' }}"><select name="sid" onchange="this.form.submit()">{% for x in servers %}<option value="{{ x.id }}" {{ 'selected' if s and x.id == s.id }}>{{ x.name }}</option>{% endfor %}</select></form>{% elif s %}<span class="badge">{{ s.name }}</span>{% endif %}</div>
+<p class="hint">از طریق API خود ایزابل؛ ایزابل بعد از هر تغییر تنظیمات را خودش اعمال می‌کند. این بخش فقط از آدرس داخلی سامانه دیده می‌شود و هر تغییر در گزارش فعالیت‌ها ثبت می‌شود.</p>
+{% if tabs %}<div class="tabs">{% for t in tabs %}<a href="/isx/{{ t }}?sid={{ s.id }}" class="{{ 'on' if t == res }}">{{ labels.get(t, t) }}</a>{% endfor %}</div>{% endif %}

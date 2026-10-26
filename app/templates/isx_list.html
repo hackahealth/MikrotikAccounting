@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_isx_tabs.html" %}
+<div class="card"><form class="filters" method="get"><input type="hidden" name="sid" value="{{ s.id }}">
+  <div><label>جستجو</label><input name="q" value="{{ q }}"></div><div><button class="btn">نمایش</button></div>
+  <div><a class="btn p" href="/isx/{{ res }}/new?sid={{ s.id }}">+ مورد جدید</a></div></form></div>
+<div class="card tbl"><table><tr>{% for c in cols %}<th class="ltr">{{ c }}</th>{% endfor %}<th></th></tr>
+{% for r in rows %}{% set rid = row_id(res, r) %}<tr>
+{% for c in cols %}{% set v = r.get(c) %}<td class="{{ 'ltr' if c != 'name' }}">{% if v is none %}{% elif c|lower in secret_keys or 'secret' in c|lower %}<span class="hint">••••••</span>{% elif v is mapping %}<span class="hint">…</span>{% elif v is iterable and v is not string %}{{ v|join(', ') }}{% else %}{{ v }}{% endif %}</td>{% endfor %}
+<td>{% if rid %}<a class="btn s" href="/isx/{{ res }}/edit?sid={{ s.id }}&id={{ rid|urlencode }}">ویرایش</a>{% endif %}</td></tr>
+{% else %}<tr><td colspan="{{ cols|length + 1 }}" class="muted">موردی نیست</td></tr>{% endfor %}</table>
+<div class="hint">{{ rows|length }} مورد</div></div>
+{% endblock %}

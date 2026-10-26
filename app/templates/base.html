@@ -40,6 +40,7 @@
   {% if 'router_admin' in perms %}<a href="/routeros" class="{{ 'on' if p.startswith('/routeros') }}">نسخه و بروزرسانی روترها</a>{% endif %}
   {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') and not p.startswith('/adm/') and p != '/adm' }}">Active Directory</a>{% endif %}
   {% if 'ad_admin' in perms %}<a href="/adm" class="{{ 'on' if p == '/adm' or p.startswith('/adm/') }}">مدیریت Active Directory</a>{% endif %}
+  {% if 'pbx_admin' in perms %}<a href="/isx" class="{{ 'on' if p == '/isx' or p.startswith('/isx/') }}">مدیریت ایزابل</a>{% endif %}
   {% if 'panel_users' in perms %}<a href="/admins" data-tour="admins" class="{{ 'on' if p.startswith('/admins') }}">کاربران پنل</a>{% endif %}
   {% if 'data_manage' in perms %}<a href="/data" class="{{ 'on' if p.startswith('/data') }}">نگهداری سابقه</a>{% endif %}
   {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}
