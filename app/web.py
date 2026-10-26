@@ -1681,6 +1681,7 @@ def _calls_ctx(request):
     rep = pbx.build(db, f.start, f.end, ids=f.ids, pbx_id=pbx_id)
     rep["offices"] = pbx.by_unit(rep["people"], "office")
     rep["departments"] = pbx.by_unit(rep["people"], "department")
+    rep["groups"] = pbx.by_unit(rep["people"], "group")
     direction = p.get("dir", "")
     recent = pbx.recent(db, f.start, f.end, ids=f.ids, pbx_id=pbx_id, limit=100)
     if direction in ("in", "out", "internal"):
@@ -1692,7 +1693,9 @@ def _calls_ctx(request):
     return db, f, rep, {"c": rep, "f": f, "start": jalali.to_jalali_str(start), "end": jalali.to_jalali_str(end),
                         "caption": caption, "qs": str(request.query_params), "recent": recent, "dir": direction,
                         "qs_nodir": urlencode([(k, v) for k, v in p.multi_items() if k != "dir"]),
-                        "pbx_names": names, "pbx_id": pbx_id, "call_users": users,
+                        "pbx_names": names, "pbx_id": pbx_id, "call_users": users, "owners": pbx.ext_owners(db),
+                        "user_names": {u.id: (u.full_name or u.username) for u in db.query(User).filter(User.id.in_(
+                            {i for r in rep["long_calls"] + rep["frequent"] for i in r["users"]} or {-1}))},
                         "servers": db.query(PbxServer).order_by(PbxServer.name).all(),
                         "weekdays": pbx.WEEKDAYS, "sl_seconds": pbx.sl_seconds(db), **_filter_lists(db, request.state.me)}
 

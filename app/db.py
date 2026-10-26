@@ -380,6 +380,7 @@ class Call(Base):
     dst = Column(String(64), default="")
     did = Column(String(64), default="")
     queue = Column(String(32), default="")                # queue number when this leg went through a queue
+    trunk = Column(String(64), default="")                # SIP trunk / line the call came in on or went out through
     __table_args__ = (UniqueConstraint("pbx_id", "key"), Index("ix_calls_user_ts", "user_id", "ts"))
 
 

@@ -110,3 +110,10 @@ border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 1
 .side .credit{padding:10px 12px;font-size:11px;color:#8a96aa;line-height:1.8}
 .side .credit span{display:block}
 @media (max-width:900px){.side details.nav-g{display:inline-block;vertical-align:top}}
+
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+th.sortable:hover{color:var(--text)}
+th.sortable::after{content:' ⇅';opacity:.35;font-size:11px}
+th.sortable.asc::after{content:' ▲';opacity:.8}
+th.sortable.desc::after{content:' ▼';opacity:.8}
+@media print{th.sortable::after{content:''}}

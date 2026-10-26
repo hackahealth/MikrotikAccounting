@@ -2898,3 +2898,57 @@ def test_issabel_setup_over_ssh(env, monkeypatch):
     db.delete(db.get(PbxServer, sid))
     db.commit()
     db.close()
+
+
+def test_call_reports_trunks_extension_service_long_and_frequent(env):
+    """Trunk of each call, per-extension unanswered / answer delay split by outside vs colleague callers, longest
+    and repeated calls, units by group, origin/destination columns; every table can be sorted in the browser."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from app import pbx
+    from app.db import Call, PbxServer, now
+    from app.web import app
+    cl = pbx.Classifier(SimpleNamespace(ext_ranges="100-399", trunks="tci"), [[(100, 399)]])
+    r = {"channel": "SIP/tci-0000001a", "dstchannel": "SIP/101-0000001b", "src": "09121234567", "dst": "101"}
+    assert cl(r)[0] == "in" and cl.trunk(r, "in") == "tci"
+    r2 = {"channel": "SIP/101-00000001", "dstchannel": "SIP/tci-00000002", "src": "101", "dst": "02188776655"}
+    assert cl(r2)[0] == "out" and cl.trunk(r2, "out") == "tci"
+    db = SessionLocal()
+    srv = PbxServer(name="ایزابل گزارش", host="10.0.0.88", ext_ranges="100-399", enabled=False)
+    db.add(srv)
+    db.commit()
+    t = now() - timedelta(hours=1)
+    rows = [  # (minute, direction, ext, other, disposition, duration, billsec, trunk)
+        (0, "in", "101", "09121234567", "NO ANSWER", 30, 0, "tci"),
+        (5, "in", "101", "09121234567", "ANSWERED", 70, 60, "tci"),
+        (9, "in", "102", "09350000000", "ANSWERED", 1240, 1200, "mokhaberat"),
+        (12, "internal", "102", "101", "NO ANSWER", 25, 0, ""),
+        (15, "internal", "103", "101", "ANSWERED", 50, 40, ""),
+        (20, "out", "101", "02188776655", "ANSWERED", 100, 90, "tci"),
+    ]
+    for i, (m, d, ext, other, disp, dur, bill, tr) in enumerate(rows):
+        db.add(Call(pbx_id=srv.id, key=f"rep{i}", linkedid=f"rep{i}", ts=t + timedelta(minutes=m), direction=d,
+                    extension=ext, other=other, disposition=disp, duration=dur, billsec=bill, trunk=tr,
+                    src=ext if d != "in" else other, dst=other if d != "in" else ext, did="02191000000" if d == "in" else ""))
+    db.commit()
+    rep = pbx.build(db, t - timedelta(minutes=1), now() + timedelta(minutes=1), pbx_id=srv.id)
+    es = {r["ext"]: r for r in rep["ext_service"]}
+    assert es["101"]["out"] == {"rang": 2, "answered": 1, "missed": 1, "missed_pct": 50, "avg_ring": 10, "max_ring": 10}
+    assert es["101"]["int"]["rang"] == 2 and es["101"]["int"]["missed"] == 1 and es["101"]["int"]["avg_ring"] == 10
+    tr = {x["trunk"]: x for x in rep["trunks"]}
+    assert tr["tci"]["in"] == 2 and tr["tci"]["missed"] == 1 and tr["tci"]["out"] == 1 and "02191000000" in tr["tci"]["dids"]
+    assert rep["long_calls"][0]["talk"] == 1200 and rep["long_calls"][0]["frm"] == "09350000000"
+    fr = rep["frequent"]
+    assert fr and fr[0]["ext"] == "101" and fr[0]["other"] == "09121234567" and fr[0]["count"] == 2
+    tc = TestClient(app)
+    tc.post("/login", data={"username": "admin", "password": "Secret12345"})
+    page = tc.get(f"/calls?preset=today&pbx={srv.id}").text
+    for h in ("داخلی‌ها: بی‌پاسخ و زمان پاسخ", "خطوط و ترانک‌ها", "طولانی‌ترین مکالمه‌ها", "تماس‌های پرتکرار",
+              "مبدا (تماس‌گیرنده)", "/static/sort.js", "جواب نداد"):
+        assert h in page, h
+    assert tc.get("/static/sort.js").status_code == 200
+    db.query(Call).filter(Call.pbx_id == srv.id).delete()
+    db.delete(srv)
+    db.commit()
+    db.close()

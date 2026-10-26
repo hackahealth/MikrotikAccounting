@@ -6,7 +6,7 @@ import threading
 from collections import defaultdict
 from datetime import timedelta
 
-from .db import (Call, ExtensionAssignment, Office, Department, PbxServer, SessionLocal, User, decrypt, get_setting,
+from .db import (Call, ExtensionAssignment, Group, Office, Department, PbxServer, SessionLocal, User, decrypt, get_setting,
                  now, set_setting)
 
 log = logging.getLogger("pbx")
@@ -112,6 +112,11 @@ class Classifier:
             ext = dp if self.is_ext(dp) else (dst if self.is_ext(dst) else "")
             return ("internal" if self.ours(src) and len(digits(src)) <= 7 else "in"), ext, src
         return "unknown", "", dst
+
+    def trunk(self, r, direction):
+        """The trunk (SIP peer / DAHDI) of an inbound or outbound leg."""
+        p = peer(r.get("channel") if direction == "in" else r.get("dstchannel") if direction == "out" else "")
+        return p if p and self.is_trunk(p) else ""
 
 
 # ------------------------------------------------------------------ extension owners
@@ -244,13 +249,22 @@ def store(db, server, rows, classify, owners):
     if not rows:
         return 0
     t0 = min(r["calldate"] for r in rows)
-    seen = {k for (k,) in db.query(Call.key).filter(Call.pbx_id == server.id, Call.ts >= t0 - timedelta(minutes=1))}
+    seen = {k: (i, t) for k, i, t in db.query(Call.key, Call.id, Call.trunk).filter(
+        Call.pbx_id == server.id, Call.ts >= t0 - timedelta(minutes=1))}
     n = 0
     for r in rows:
         k = _key(r)
-        if k in seen or not r.get("calldate"):
+        if not r.get("calldate"):
             continue
-        seen.add(k)
+        if k in seen:
+            cid, trunk = seen[k]
+            if cid and not trunk:                   # read again (older history): fill the trunk of older versions
+                t = classify.trunk(r, classify(r)[0])
+                if t:
+                    db.query(Call).filter(Call.id == cid).update({"trunk": t[:64]})
+                    seen[k] = (cid, t)
+            continue
+        seen[k] = (None, "")
         direction, ext, other = classify(r)
         ts = r["calldate"]
         db.add(Call(pbx_id=server.id, key=k, linkedid=str(r.get("linkedid") or r.get("uniqueid") or k)[:64], ts=ts,
@@ -259,7 +273,7 @@ def store(db, server, rows, classify, owners):
                     disposition=str(r.get("disposition") or "")[:20], duration=int(r.get("duration") or 0),
                     billsec=int(r.get("billsec") or 0), src=str(r.get("src") or "")[:64],
                     dst=str(r.get("dst") or "")[:64], did=str(r.get("did") or "")[:64],
-                    queue=queue_of(r)))
+                    queue=queue_of(r), trunk=classify.trunk(r, direction)[:64]))
         n += 1
     return n
 
@@ -341,11 +355,15 @@ def build(db, start, end, ids=None, pbx_id=None, top=15):
         e = calls.get(k)
         if e is None:
             e = calls[k] = {"ts": c.ts, "direction": c.direction, "other": c.other, "answered": False, "talk": 0,
-                            "ring": None, "exts": [], "users": set(), "pbx_id": c.pbx_id}
+                            "ring": None, "exts": [], "users": set(), "pbx_id": c.pbx_id, "trunk": "", "did": "",
+                            "src": c.src}
         if c.direction != "unknown" and e["direction"] == "unknown":
             e["direction"], e["other"] = c.direction, c.other
-        if c.extension and c.extension not in e["exts"]:
+        if c.extension and c.extension not in e["exts"] and c.extension != c.queue \
+                and c.extension not in e.get("queues", ()):
             e["exts"].append(c.extension)
+        e["trunk"] = e["trunk"] or (c.trunk or "")
+        e["did"] = e["did"] or (c.did or "")
         if c.user_id:
             e["users"].add(c.user_id)
         if c.queue and c.queue not in e.setdefault("queues", []):
@@ -426,7 +444,117 @@ def build(db, start, end, ids=None, pbx_id=None, top=15):
         "missed": missed_list[:100], "missed_count": len(missed_list),
         "unassigned": _unassigned(legs),
         "queues": queues(db, calls, legs),
+        "long_calls": long_calls(cl),
+        "frequent": frequent(cl),
+        "trunks": trunks(cl),
+        "ext_service": ext_service(legs),
     }
+
+
+def ends(e):
+    """(from, to) of a logical call: the outside number or our extension(s)."""
+    exts = "، ".join(e["exts"]) or "-"
+    if e["direction"] == "in":
+        return e["other"] or "-", exts
+    if e["direction"] == "out":
+        return exts, e["other"] or "-"
+    return (e["exts"][0] if e["exts"] else e["src"] or "-"), (e["other"] or "-")
+
+
+def long_calls(cl, top=25):
+    rows = sorted((e for e in cl if e["answered"] and e["direction"] in ("in", "out", "internal")),
+                  key=lambda e: -e["talk"])[:top]
+    return [dict(ts=e["ts"], direction=e["direction"], talk=e["talk"], trunk=e["trunk"], users=sorted(e["users"]),
+                 frm=ends(e)[0], to=ends(e)[1], pbx_id=e["pbx_id"]) for e in rows]
+
+
+def frequent(cl, top=25):
+    """The same two parties again and again: (our extension, the other number / extension) with 2+ calls."""
+    pairs = {}
+    for e in cl:
+        if e["direction"] not in ("in", "out", "internal") or not e["other"]:
+            continue
+        ours = e["exts"][0] if e["exts"] else (e["src"] if e["direction"] != "in" else "")
+        if not ours:
+            continue
+        other = digits(e["other"]) or e["other"]
+        a, b = (ours, other) if e["direction"] != "internal" else tuple(sorted((ours, other)))
+        p = pairs.setdefault((e["direction"] if e["direction"] == "internal" else "x", a, b),
+                             {"ext": a, "other": b, "internal": e["direction"] == "internal", "in": 0, "out": 0,
+                              "count": 0, "answered": 0, "talk": 0, "users": set(), "last": e["ts"]})
+        p["count"] += 1
+        p["in" if e["direction"] == "in" else "out"] += 1
+        p["answered"] += e["answered"]
+        p["talk"] += e["talk"]
+        p["users"].update(e["users"])
+        p["last"] = max(p["last"], e["ts"])
+    rows = sorted((p for p in pairs.values() if p["count"] >= 2), key=lambda p: (-p["count"], -p["talk"]))[:top]
+    return [dict(p, users=sorted(p["users"])) for p in rows]
+
+
+def trunks(cl):
+    """Per trunk (SIP line): inbound and outbound calls, unanswered inbound, talk time, the DIDs dialled."""
+    out = {}
+    for e in cl:
+        if e["direction"] not in ("in", "out"):
+            continue
+        t = out.setdefault(e["trunk"] or "نامشخص", {"trunk": e["trunk"] or "نامشخص", "in": 0, "in_answered": 0,
+                                                     "out": 0, "out_answered": 0, "talk": 0, "dids": set()})
+        t[e["direction"]] += 1
+        t[e["direction"] + "_answered"] += e["answered"]
+        t["talk"] += e["talk"]
+        if e["direction"] == "in" and e["did"]:
+            t["dids"].add(e["did"])
+    return [dict(t, missed=t["in"] - t["in_answered"], dids="، ".join(sorted(t["dids"])[:8]))
+            for t in sorted(out.values(), key=lambda t: -(t["in"] + t["out"]))]
+
+
+def ext_service(legs):
+    """Per extension that was rung: how often it rang, answered, did not answer, and how long it rang before
+    answering, separately for calls from outside the organization (inbound) and from colleagues (internal)."""
+    out = {}
+    for c in legs:
+        if c.direction == "in":
+            ext, origin = c.extension, "out"
+        elif c.direction == "internal":
+            ext, origin = digits(c.other), "int"
+        else:
+            continue
+        if not ext or len(ext) > 7 or (c.queue and ext == c.queue):
+            continue
+        r = out.setdefault((c.pbx_id, ext), {"ext": ext, "pbx_id": c.pbx_id,
+                                             "out": {"rang": 0, "answered": 0, "rings": []},
+                                             "int": {"rang": 0, "answered": 0, "rings": []}})
+        x = r[origin]
+        x["rang"] += 1
+        if answered_leg(c):
+            x["answered"] += 1
+            x["rings"].append(max(0, c.duration - c.billsec))
+    rows = []
+    for r in out.values():
+        row = {"ext": r["ext"], "pbx_id": r["pbx_id"]}
+        for o in ("out", "int"):
+            x = r[o]
+            missed = x["rang"] - x["answered"]
+            row[o] = {"rang": x["rang"], "answered": x["answered"], "missed": missed,
+                      "missed_pct": round(100 * missed / x["rang"]) if x["rang"] else 0,
+                      "avg_ring": round(sum(x["rings"]) / len(x["rings"])) if x["rings"] else 0,
+                      "max_ring": max(x["rings"], default=0)}
+        row["missed"] = row["out"]["missed"] + row["int"]["missed"]
+        rows.append(row)
+    rows.sort(key=lambda r: (-r["missed"], -max(r["out"]["avg_ring"], r["int"]["avg_ring"])))
+    return rows
+
+
+def ext_owners(db):
+    """Extension -> the name of whoever holds it today."""
+    today = now().date()
+    users = {u.id: (u.full_name or u.username) for u in db.query(User.id, User.full_name, User.username)}
+    out = {}
+    for a in db.query(ExtensionAssignment):
+        if (not a.start or a.start <= today) and (not a.end or a.end >= today) and a.user_id in users:
+            out[a.extension] = users[a.user_id]
+    return out
 
 
 def sl_seconds(db):
@@ -550,6 +678,7 @@ def people(db, legs, answered_calls=None):
     users = {u.id: u for u in db.query(User).filter(User.id.in_(list(rows) or [-1]))}
     offices = {o.id: o.name for o in db.query(Office)}
     depts = {d.id: d.name for d in db.query(Department)}
+    grps = {g.id: g.name for g in db.query(Group)}
     out = []
     for uid, r in rows.items():
         u = users.get(uid)
@@ -557,6 +686,7 @@ def people(db, legs, answered_calls=None):
         out.append(dict(r, exts="، ".join(sorted(r["exts"])), calls=None,
                         username=u.username if u else "?", full_name=u.full_name if u else "",
                         office=offices.get(u.office_id, "") if u else "", department=depts.get(u.department_id, "") if u else "",
+                        group=grps.get(u.group_id, "") if u else "",
                         office_id=u.office_id if u else None, department_id=u.department_id if u else None,
                         total=r["in"] + r["out"],
                         avg_talk=int(r["talk"] / answered) if answered else 0))
@@ -568,8 +698,9 @@ def by_unit(people_rows, key):
     out = {}
     for r in people_rows:
         name = r[key] or "نامشخص"
-        e = out.setdefault(name, {"name": name, "in": 0, "out": 0, "missed": 0, "talk": 0, "people": 0})
-        for k in ("in", "out", "missed", "talk"):
+        e = out.setdefault(name, {"name": name, "in": 0, "in_answered": 0, "out": 0, "out_answered": 0,
+                                  "internal": 0, "missed": 0, "talk": 0, "people": 0})
+        for k in ("in", "in_answered", "out", "out_answered", "internal", "missed", "talk"):
             e[k] += r[k]
         e["people"] += 1
     return sorted(out.values(), key=lambda e: -(e["in"] + e["out"]))

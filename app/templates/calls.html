@@ -17,10 +17,11 @@
   <div><button class="btn p" onclick="this.form.preset.value=''">نمایش</button></div>
 </form></div>
 
+<p class="hint" style="margin:0 0 10px">↙ <b>ورودی</b> = از بیرون سازمان (از خط/ترانک) به یک داخلی · ↗ <b>خروجی</b> = از یک داخلی به بیرون سازمان · ⇄ <b>بین همکاران</b> = از داخلی به داخلی. <b>بی‌پاسخ</b> = زنگ خورد ولی هیچ‌کس برنداشت (در صف: اپراتوری جواب نداد). <b>انتظار</b> = چند ثانیه زنگ خورد تا جواب داده شد.</p>
 <div class="grid g4">
-  <div class="card stat"><div class="l">تماس ورودی</div><div class="v">{{ st['in'].count }}</div>
+  <div class="card stat"><div class="l">↙ ورودی (از بیرون)</div><div class="v">{{ st['in'].count }}</div>
     <div class="hint">پاسخ‌داده {{ st['in'].answered }} · بی‌پاسخ <b>{{ st['in'].count - st['in'].answered }}</b>{% if st['in'].count %} ({{ ((st['in'].count - st['in'].answered) * 100 / st['in'].count)|round|int }}٪){% endif %}</div></div>
-  <div class="card stat"><div class="l">تماس خروجی</div><div class="v">{{ st.out.count }}</div>
+  <div class="card stat"><div class="l">↗ خروجی (به بیرون)</div><div class="v">{{ st.out.count }}</div>
     <div class="hint">پاسخ‌داده {{ st.out.answered }} · داخلی (بین همکاران) {{ st.internal.count }}</div></div>
   <div class="card stat"><div class="l">مجموع مکالمه</div><div class="v">{{ c.talk|duration }}</div>
     <div class="hint">میانگین هر مکالمه <span class="ltr">{{ c.avg_talk|mmss }}</span> دقیقه</div></div>
@@ -47,11 +48,35 @@
 </table></div>
 
 {% if c.people and not f.user_id %}
-<div class="grid g2">{% for title, rows in [('دفتر', c.offices), ('واحد', c.departments)] %}
-  <div class="card tbl"><h3>به تفکیک {{ title }}</h3><table><tr><th>{{ title }}</th><th>نفرات</th><th>ورودی</th><th>بی‌پاسخ</th><th>خروجی</th><th>مکالمه</th></tr>
-  {% for e in rows %}<tr><td>{{ e.name }}</td><td>{{ e.people }}</td><td>{{ e['in'] }}</td><td>{{ e.missed }}</td><td>{{ e.out }}</td><td>{{ e.talk|duration }}</td></tr>{% endfor %}
-  </table></div>{% endfor %}
-</div>{% endif %}
+{% for title, rows in [('دفتر', c.offices), ('واحد / دپارتمان', c.departments), ('گروه کاربری', c.groups)] %}{% if rows|length > 1 or (rows and rows[0].name != 'نامشخص') %}
+  <div class="card tbl"><h3>تماس‌ها به تفکیک {{ title }}</h3><table><tr><th>{{ title }}</th><th>نفرات</th><th>ورودی</th><th>پاسخ داده</th><th>بی‌پاسخ</th><th>٪ بی‌پاسخ</th><th>خروجی</th><th>بین همکاران</th><th>مجموع مکالمه</th></tr>
+  {% for e in rows %}<tr><td>{{ e.name }}</td><td>{{ e.people }}</td><td>{{ e['in'] }}</td><td>{{ e.in_answered }}</td><td>{% if e.missed %}<span class="badge warn">{{ e.missed }}</span>{% else %}0{% endif %}</td>
+  <td>{{ ((e.missed * 100 / e['in'])|round|int) if e['in'] else 0 }}٪</td><td>{{ e.out }}</td><td>{{ e.internal }}</td><td>{{ e.talk|duration }}</td></tr>{% endfor %}
+  </table></div>{% endif %}{% endfor %}
+{% endif %}
+
+{% if c.ext_service %}<div class="card tbl" id="ext-service"><h3>داخلی‌ها: بی‌پاسخ و زمان پاسخ <span class="hint">هر بار زنگ خوردن داخلی حساب می‌شود؛ جدول بر اساس بیشترین بی‌پاسخ مرتب شده</span></h3><table>
+<tr><th>داخلی</th>{% if servers|length > 1 %}<th>سرور</th>{% endif %}<th>صاحب داخلی</th><th>از بیرون: زنگ</th><th>پاسخ</th><th>بی‌پاسخ</th><th>٪</th><th>میانگین انتظار</th><th>بیشترین انتظار</th><th>از همکاران: زنگ</th><th>پاسخ</th><th>بی‌پاسخ</th><th>٪</th><th>میانگین انتظار</th><th>بیشترین انتظار</th></tr>
+{% for r in c.ext_service[:60] %}<tr><td class="ltr">{{ r.ext }}</td>{% if servers|length > 1 %}<td>{{ pbx_names.get(r.pbx_id, '') }}</td>{% endif %}<td>{{ owners.get(r.ext, '-') }}</td>
+{% for o in (r.out, r.int) %}<td>{{ o.rang }}</td><td>{{ o.answered }}</td><td>{% if o.missed %}<span class="badge {{ 'err' if o.missed_pct >= 30 else 'warn' }}">{{ o.missed }}</span>{% else %}0{% endif %}</td><td>{{ o.missed_pct }}٪</td><td data-sort="{{ o.avg_ring }}">{{ o.avg_ring }}s</td><td data-sort="{{ o.max_ring }}">{{ o.max_ring }}s</td>{% endfor %}</tr>{% endfor %}
+</table></div>{% endif %}
+
+{% if c.trunks %}<div class="card tbl" id="trunks"><h3>خطوط و ترانک‌ها <span class="hint">تماس‌های بیرون سازمان از کدام خط آمده یا رفته</span></h3><table>
+<tr><th>ترانک (SIP)</th><th>شمارهٔ گرفته‌شده (DID)</th><th>ورودی</th><th>پاسخ داده</th><th>بی‌پاسخ</th><th>خروجی</th><th>مجموع مکالمه</th></tr>
+{% for t in c.trunks %}<tr><td class="ltr">{{ t.trunk }}</td><td class="ltr">{{ t.dids or '-' }}</td><td>{{ t['in'] }}</td><td>{{ t.in_answered }}</td><td>{% if t.missed %}<span class="badge warn">{{ t.missed }}</span>{% else %}0{% endif %}</td><td>{{ t.out }}</td><td>{{ t.talk|duration }}</td></tr>{% endfor %}
+</table>{% if c.trunks|selectattr('trunk', 'equalto', 'نامشخص')|list %}<p class="hint">«نامشخص»: تماس‌هایی که قبل از این نسخه خوانده شده‌اند. برای پر شدن، در «سرورهای ایزابل» دکمهٔ «خواندن سوابق قبلی» را بزنید.</p>{% endif %}</div>{% endif %}
+
+{% macro who(ids) %}{% for i in ids %}{{ user_names.get(i, '') }}{{ '، ' if not loop.last }}{% endfor %}{% endmacro %}
+{% set arrows = {'in': '↙ ورودی', 'out': '↗ خروجی', 'internal': '⇄ بین همکاران'} %}
+<div class="grid g2">
+  <div class="card tbl"><h3>طولانی‌ترین مکالمه‌ها</h3><table><tr><th>زمان</th><th>جهت</th><th>مبدا</th><th>مقصد</th><th>کارمند</th><th>مکالمه</th></tr>
+  {% for r in c.long_calls %}<tr><td>{{ r.ts|jdt }}</td><td>{{ arrows.get(r.direction) }}</td><td class="ltr">{{ r.frm }}</td><td class="ltr">{{ r.to }}</td><td>{{ who(r.users) or '-' }}</td><td data-sort="{{ r.talk }}" class="ltr">{{ r.talk|mmss }}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">-</td></tr>{% endfor %}</table></div>
+  <div class="card tbl"><h3>تماس‌های پرتکرار <span class="hint">همان دو طرف، دو بار یا بیشتر</span></h3><table><tr><th>داخلی</th><th>کارمند</th><th>طرف مقابل</th><th>دفعات</th><th>ورودی / خروجی</th><th>پاسخ داده</th><th>مکالمه</th><th>آخرین</th></tr>
+  {% for p in c.frequent %}<tr><td class="ltr">{{ p.ext }}</td><td>{{ who(p.users) or owners.get(p.ext, '-') }}</td><td class="ltr">{{ p.other }}{% if p.internal %} <span class="hint">{{ owners.get(p.other, '') }}</span>{% endif %}</td><td>{{ p.count }}</td>
+  <td>{% if p.internal %}بین همکاران{% else %}{{ p['in'] }} / {{ p.out }}{% endif %}</td><td>{{ p.answered }}</td><td>{{ p.talk|duration }}</td><td>{{ p.last|jdt }}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">-</td></tr>{% endfor %}</table></div>
+</div>
 
 <div class="grid g2">
   <div class="card tbl"><h3>مقاصد پرتماس <span class="hint">تماس خروجی</span></h3>
@@ -89,12 +114,16 @@
 </table></div>{% endif %}
 
 <div class="card tbl" id="recent"><div class="top"><h3>ریز تماس‌ها <span class="hint">{{ recent|length }} مورد آخر</span></h3>
-<div>{% for k, v in [('', 'همه'), ('in', 'ورودی'), ('out', 'خروجی'), ('internal', 'داخلی')] %}<a class="btn s{{ ' p' if dir == k }}" href="?{{ qs_nodir }}{{ '&' if qs_nodir }}dir={{ k }}#recent">{{ v }}</a> {% endfor %}</div></div>
-<table><tr><th>زمان</th>{% if servers|length > 1 %}<th>سرور</th>{% endif %}<th>جهت</th><th>داخلی</th><th>کارمند</th><th>طرف مقابل</th><th>وضعیت</th><th>انتظار</th><th>مکالمه</th></tr>
-{% for r in recent %}{% set u = call_users.get(r.user_id) %}<tr><td>{{ r.ts|jdt }}</td>{% if servers|length > 1 %}<td>{{ pbx_names.get(r.pbx_id, '') }}</td>{% endif %}
-<td>{{ {'in': 'ورودی', 'out': 'خروجی', 'internal': 'داخلی'}.get(r.direction, 'نامشخص') }}</td><td class="ltr">{{ r.extension or '-' }}</td><td>{{ (u.full_name or u.username) if u else '-' }}</td>
-<td class="ltr">{{ r.other }}</td><td>{% if r.disposition == 'ANSWERED' and r.billsec %}<span class="badge ok">پاسخ داده</span>{% elif r.disposition == 'BUSY' %}<span class="badge warn">مشغول</span>{% else %}<span class="badge err">بی‌پاسخ</span>{% endif %}</td>
-<td class="ltr">{{ (r.duration - r.billsec) if r.billsec else r.duration }}s</td><td class="ltr">{{ r.billsec|mmss }}</td></tr>
+<div>{% for k, v in [('', 'همه'), ('in', '↙ ورودی'), ('out', '↗ خروجی'), ('internal', '⇄ بین همکاران')] %}<a class="btn s{{ ' p' if dir == k }}" href="?{{ qs_nodir }}{{ '&' if qs_nodir }}dir={{ k }}#recent">{{ v }}</a> {% endfor %}</div></div>
+<table><tr><th>زمان</th>{% if servers|length > 1 %}<th>سرور</th>{% endif %}<th>جهت</th><th>مبدا (تماس‌گیرنده)</th><th>مقصد</th><th>خط / ترانک</th><th>وضعیت</th><th>انتظار</th><th>مکالمه</th></tr>
+{% for r in recent %}{% set u = call_users.get(r.user_id) %}{% set me_ = (r.extension or '-') ~ ((' — ' ~ (u.full_name or u.username)) if u else '') %}
+{% set oth = r.other or '-' %}{% if r.direction == 'internal' and owners.get(r.other) %}{% set oth = r.other ~ ' — ' ~ owners.get(r.other) %}{% endif %}
+<tr><td>{{ r.ts|jdt }}</td>{% if servers|length > 1 %}<td>{{ pbx_names.get(r.pbx_id, '') }}</td>{% endif %}
+<td>{{ arrows.get(r.direction, 'نامشخص') }}</td>
+<td>{{ oth if r.direction == 'in' else me_ }}</td><td>{{ me_ if r.direction == 'in' else oth }}{% if r.queue %} <span class="hint">صف {{ r.queue }}</span>{% endif %}</td>
+<td class="ltr">{{ r.trunk or '-' }}{% if r.direction == 'in' and r.did %} <span class="hint">({{ r.did }})</span>{% endif %}</td>
+<td>{% if r.disposition == 'ANSWERED' and r.billsec %}<span class="badge ok">پاسخ داده شد</span>{% elif r.disposition == 'BUSY' %}<span class="badge warn">مشغول بود</span>{% elif r.disposition in ('FAILED', 'CONGESTION') %}<span class="badge err">برقرار نشد</span>{% else %}<span class="badge err">جواب نداد</span>{% endif %}</td>
+<td class="ltr" data-sort="{{ (r.duration - r.billsec) if r.billsec else r.duration }}">{{ (r.duration - r.billsec) if r.billsec else r.duration }}s</td><td class="ltr" data-sort="{{ r.billsec }}">{{ r.billsec|mmss }}</td></tr>
 {% else %}<tr><td colspan="9" class="muted">تماسی نیست</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

@@ -1,1 +1,1 @@
-VERSION = "1.21.1"     # 2026-10-26: AMI user from the SSH setup gets write = reporting
+VERSION = "1.22.0"     # 2026-10-26: sortable tables, call reports by trunk / extension service / long and frequent
