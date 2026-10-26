@@ -2441,6 +2441,32 @@ def test_ad_administration_internal_only_and_group_mapping(env, monkeypatch):
     # reza is in the Yazd OU (priority 10) and in Net-Staff of the Tehran group (20): the Yazd group wins
     assert db.query(User).filter_by(username="reza.y").one().group.name == "اینترنت یزد"
     assert db.query(User).filter_by(username="mina.o").one().group.name == "اینترنت تهران"
+    # choosable values, free Issabel extensions, bulk changes
+    from datetime import datetime
+    from app.db import AdChoice, Call
+    from app.web import app as _app
+    db.add(Call(pbx_id=999, key="t-free-1", linkedid="x", ts=datetime.now(), direction="out", extension="4747"))
+    db.commit()
+    with TestClient(_app, client=("192.168.1.20", 4000), headers={"host": "192.168.1.5:9090"}) as c:
+        _login(c, "admin", "Secret12345")
+        c.post("/adm/values/op", data={"op": "add", "attr": "title", "values": "کارشناس مالی\nمدیر دفتر"})
+        assert db.query(AdChoice).filter_by(attr="title").count() == 2
+        r = c.get("/adm/users")
+        assert "<option>کارشناس مالی</option>" in r.text and "4747 (آزاد" in r.text
+        rdn = "CN=Reza Yazdi,OU=Yazd,OU=Offices,DC=corp,DC=local"
+        r = c.post("/adm/users/bulk", data={"dn": [rdn, "CN=Mina Office,CN=Users,DC=corp,DC=local"], "op": "attr",
+                                             "attr": "title", "value_title": "مدیر دفتر"})
+        assert "2 کاربر انجام شد" in r.text
+        r = c.get("/adm/values")
+        assert r.status_code == 200 and "مدیر دفتر" in r.text and "2 کاربر" in r.text
+        r = c.post("/adm/values/op", data={"op": "rename", "attr": "physicalDeliveryOfficeName", "old": "Tehran-HQ",
+                                            "new": "دفتر مرکزی"})
+        assert "برای 1 کاربر" in r.text
+        r = c.post("/adm/users/bulk", data={"dn": [rdn], "op": "attr", "attr": "ipPhone", "value_ipPhone": "4747"})
+        with ad_admin.AD(db) as ad:
+            assert ad.user(rdn)["attrs"]["title"] == "مدیر دفتر" and ad.user(rdn)["attrs"]["ipPhone"] == "4747"
+            assert ad.user("CN=Mina Office,CN=Users,DC=corp,DC=local")["attrs"]["physicalDeliveryOfficeName"] == "دفتر مرکزی"
+        assert "4747 (آزاد" not in c.get("/adm/users").text           # now held by reza in AD
     set_setting(db, "ldap_server", "")
     set_setting(db, "public_hosts", "")
     db.commit()

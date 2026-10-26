@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_adm_tabs.html" import ou_select with context %}
+{% from "_adm_tabs.html" import ou_select, attr_field with context %}
 {% block content %}
 {% include "_adm_tabs.html" %}
 <div class="card"><h3>{{ u.name }} <span class="ltr hint">{{ u.sam }}</span>
@@ -14,7 +14,7 @@
 
 <div class="card"><h3>مشخصات</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">
 <div class="grid g3">{% for k, label in editable %}
-<div class="fg"><label>{{ label }}</label><input name="{{ k }}" value="{{ u.attrs[k] }}" {{ 'class=ltr' if k in ('mail', 'telephoneNumber', 'mobile', 'ipPhone', 'employeeID') }}></div>{% endfor %}</div>
+<div class="fg"><label>{{ label }}</label>{{ attr_field(k, label, u.attrs[k], choices, free_exts) }}</div>{% endfor %}</div>
 <button class="btn p" name="op" value="save">ذخیره در AD</button></form></div>
 
 <div class="card"><h3>گروه‌ها (دسترسی‌ها)</h3><form method="post" action="/adm/user/op"><input type="hidden" name="dn" value="{{ u.dn }}">

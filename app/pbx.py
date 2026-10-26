@@ -601,3 +601,24 @@ def current_extensions(db, user_ids):
             out[a.user_id].append(a.extension)
     return out
 
+
+
+def free_extensions(db):
+    """Extensions seen on the PBX servers that nobody holds today and that no user has as AD ipPhone:
+    [(extension, number of calls)], in numeric order."""
+    from sqlalchemy import func
+    today = now().date()
+    held = {a.extension for a in db.query(ExtensionAssignment)
+            if (not a.start or a.start <= today) and (not a.end or a.end >= today)}
+    held |= {digits(u.ip_phone) for u in db.query(User).filter(User.ip_phone != "", User.ip_phone.isnot(None),
+                                                                    User.enabled.is_(True))}
+    ranges = [r for r in (parse_ranges(s.ext_ranges) for s in db.query(PbxServer)) if r]
+    out = {}
+    for ext, n in db.query(Call.extension, func.count(Call.id)).filter(Call.extension != "").group_by(Call.extension):
+        e = digits(ext)
+        if not e or e != str(ext) or len(e) > 7 or e in held:
+            continue
+        if ranges and not any(in_ranges(e, r) for r in ranges):
+            continue
+        out[e] = out.get(e, 0) + n
+    return sorted(out.items(), key=lambda x: (len(x[0]), x[0]))

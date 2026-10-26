@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_adm_tabs.html" import ou_select with context %}
+{% from "_adm_tabs.html" import ou_select, attr_field with context %}
 {% block content %}
 {% include "_adm_tabs.html" %}
 <div class="card"><form class="filters" method="get">
@@ -16,7 +16,7 @@
   <div class="fg"><label>نام خانوادگی</label><input name="sn"></div>
   <div class="fg"><label>رمز اولیه</label><input name="password" type="password" class="ltr" autocomplete="new-password"></div>
   {% for k, label in editable if k not in ('givenName', 'sn', 'displayName') %}
-  <div class="fg"><label>{{ label }}</label><input name="{{ k }}" {{ 'class=ltr' if k in ('mail', 'telephoneNumber', 'mobile', 'ipPhone', 'employeeID') }}></div>{% endfor %}
+  <div class="fg"><label>{{ label }}</label>{{ attr_field(k, label, '', choices, free_exts) }}</div>{% endfor %}
 </div>
 <div class="fg"><label><input type="checkbox" name="must_change" value="1" checked> تغییر رمز در اولین ورود</label>
 <label><input type="checkbox" name="enabled" value="1" checked> حساب فعال باشد</label></div>
@@ -24,16 +24,36 @@
 <select name="groups" multiple size="8">{% for g in groups %}<option value="{{ g.dn }}">{{ g.name }}{% if g.description %} — {{ g.description }}{% endif %}</option>{% endfor %}</select>
 <div class="hint">با Ctrl چند گروه را انتخاب کنید.</div></div>
 <button class="btn p">ساخت کاربر</button>
+<p class="hint">مقادیر سمت، واحد، دفتر، شهر و شرکت از «مقادیر انتخابی» می‌آیند؛ داخلی‌ها از داخلی‌های ایزابل که به کسی داده نشده‌اند.</p>
 <p class="hint">بدون رمز، حساب غیرفعال ساخته می‌شود. رمز فقط روی اتصال رمزشده (LDAPS یا StartTLS) فرستاده می‌شود.</p>
 </form></details>
+<form method="post" action="/adm/users/bulk" id="bulk">
+<input type="hidden" name="back" value="/adm/users?q={{ q|urlencode }}&ou={{ ou|urlencode }}">
+<div class="card" id="bulkbar" style="display:none"><b>تغییر گروهی <span id="bulkn">0</span> کاربر انتخاب‌شده</b>
+<div class="filters" style="margin-top:8px">
+  <div><label>عملیات</label><select name="op" onchange="bulkOp(this.value)">
+    <option value="attr">تعیین خصیصه</option><option value="group_add">افزودن به گروه</option><option value="group_remove">خارج کردن از گروه</option>
+    <option value="move">انتقال به OU</option><option value="enable">فعال کردن</option><option value="disable">غیرفعال کردن</option></select></div>
+  <div data-op="attr"><label>خصیصه</label><select name="attr" onchange="bulkAttr(this.value)">{% for k, label in bulk_attrs %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></div>
+  {% for k, label in bulk_attrs %}<div data-op="attr" data-attr="{{ k }}" {{ 'style=display:none' if not loop.first }}><label>مقدار جدید</label>{{ attr_field(k, label, '', choices, free_exts, 'value_' ~ k) }}</div>{% endfor %}
+  <div data-op="group" style="display:none"><label>گروه</label><select name="group">{% for g in groups %}<option value="{{ g.dn }}">{{ g.name }}</option>{% endfor %}</select></div>
+  <div data-op="move" style="display:none"><label>OU</label>{{ ou_select('ou', ous) }}</div>
+  <div><button class="btn p" onclick="return confirm('روی همهٔ کاربران انتخاب‌شده در AD اعمال شود؟')">اعمال در AD</button></div>
+</div></div>
 <div class="card tbl"><table>
-<tr><th>نام کاربری</th><th>نام</th><th>واحد / دفتر</th><th>OU</th><th>وضعیت</th><th>آخرین ورود</th><th>گروه‌ها</th></tr>
+<tr><th><input type="checkbox" onclick="document.querySelectorAll('input[name=dn]').forEach(c=>c.checked=this.checked);bulkCount()"></th><th>نام کاربری</th><th>نام</th><th>سمت</th><th>واحد / دفتر</th><th>داخلی</th><th>OU</th><th>وضعیت</th><th>آخرین ورود</th><th>گروه‌ها</th></tr>
 {% for u in users %}
-<tr><td class="ltr"><a href="/adm/user?dn={{ u.dn|urlencode }}">{{ u.sam }}</a></td><td>{{ u.name }}</td>
-<td>{{ u.attrs.department }}{% if u.attrs.physicalDeliveryOfficeName %} / {{ u.attrs.physicalDeliveryOfficeName }}{% endif %}</td>
+<tr><td><input type="checkbox" name="dn" value="{{ u.dn }}" onchange="bulkCount()"></td>
+<td class="ltr"><a href="/adm/user?dn={{ u.dn|urlencode }}">{{ u.sam }}</a></td><td>{{ u.name }}</td><td>{{ u.attrs.title }}</td>
+<td>{{ u.attrs.department }}{% if u.attrs.physicalDeliveryOfficeName %} / {{ u.attrs.physicalDeliveryOfficeName }}{% endif %}</td><td class="ltr">{{ u.attrs.ipPhone }}</td>
 <td class="hint ltr">{{ u.ou.split(',')[0].split('=')[-1] }}</td>
 <td>{% if u.disabled %}<span class="badge err">غیرفعال</span>{% else %}<span class="badge ok">فعال</span>{% endif %}{% if u.locked %} <span class="badge warn">قفل</span>{% endif %}</td>
 <td>{{ u.last_logon|jdt if u.last_logon else '-' }}</td><td class="hint">{{ u.member_of|length }}</td></tr>
-{% else %}<tr><td colspan="7" class="muted">کاربری پیدا نشد</td></tr>{% endfor %}
-</table></div>
+{% else %}<tr><td colspan="10" class="muted">کاربری پیدا نشد</td></tr>{% endfor %}
+</table></div></form>
+<script>
+function bulkCount(){var n=document.querySelectorAll('input[name=dn]:checked').length;document.getElementById('bulkn').textContent=n;document.getElementById('bulkbar').style.display=n?'':'none'}
+function bulkOp(v){document.querySelectorAll('#bulk [data-op]').forEach(e=>{var o=e.dataset.op;e.style.display=(o==v||(o=='group'&&v.startsWith('group')))&&!(e.dataset.attr&&e.dataset.attr!=document.querySelector('#bulk [name=attr]').value)?'':'none'})}
+function bulkAttr(v){document.querySelectorAll('#bulk [data-attr]').forEach(e=>e.style.display=e.dataset.attr==v?'':'none')}
+</script>
 {% endblock %}

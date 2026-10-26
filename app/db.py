@@ -333,6 +333,15 @@ class PbxServer(Base):
     ami_password_enc = Column(Text, default="")
 
 
+class AdChoice(Base):
+    """A value offered for an AD attribute (title, department, office, city, company) on the AD user forms."""
+    __tablename__ = "ad_choices"
+    id = Column(Integer, primary_key=True)
+    attr = Column(String(50), index=True)
+    value = Column(String(200), nullable=False)
+    __table_args__ = (UniqueConstraint("attr", "value", name="uq_ad_choice"),)
+
+
 class ExtensionAssignment(Base):
     """Extension -> person for a period (an extension changes hands; a person can have several)."""
     __tablename__ = "extension_assignments"

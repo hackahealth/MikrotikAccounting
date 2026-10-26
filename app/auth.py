@@ -119,7 +119,7 @@ ROUTES = [
     ("GET", r"/access(/preview/\d+)?", "access_manage"), ("POST", r"/access/.*", "access_manage"),
     ("GET", r"/winlogons", "devices_view"),
     ("GET", r"/messages", "ad_message"), ("POST", r"/messages/.*", "ad_message"),
-    ("GET", r"/adm(/(users|user|groups|group|ous|computers))?", "ad_admin"), ("POST", r"/adm/.*", "ad_admin"),
+    ("GET", r"/adm(/(users|user|groups|group|ous|computers|values))?", "ad_admin"), ("POST", r"/adm/.*", "ad_admin"),
 ]
 _ROUTES = [(m, re.compile(p + r"/?$"), perm) for m, p, perm in ROUTES]
 

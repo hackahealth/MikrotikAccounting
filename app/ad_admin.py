@@ -25,6 +25,38 @@ EDITABLE = (("givenName", "نام"), ("sn", "نام خانوادگی"), ("displa
             ("l", "شهر"), ("company", "شرکت"), ("telephoneNumber", "تلفن"), ("mobile", "موبایل"),
             ("ipPhone", "داخلی (ipPhone)"), ("employeeID", "کد پرسنلی"), ("description", "توضیح"))
 
+CHOICE_ATTRS = (("title", "سمت"), ("department", "واحد (department)"), ("physicalDeliveryOfficeName", "دفتر (office)"),
+                ("l", "شهر"), ("company", "شرکت"))
+BULK_ATTRS = CHOICE_ATTRS + (("ipPhone", "داخلی (ipPhone)"), ("description", "توضیح"))
+
+
+def choices(db):
+    """{attr: [values]} offered on the forms: the lists defined on the «values» page plus the panel's offices,
+    units and cities."""
+    from .db import AdChoice, Department, Office
+    out = {k: set() for k, _ in CHOICE_ATTRS}
+    for c in db.query(AdChoice):
+        if c.attr in out:
+            out[c.attr].add(c.value)
+    for o in db.query(Office):
+        out["physicalDeliveryOfficeName"].add(o.ldap_value or o.name)
+        if o.city:
+            out["l"].add(o.city)
+    for d in db.query(Department):
+        out["department"].add(d.ldap_value or d.name)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def used_values(users):
+    """{attr: [(value, count)]} of the attributes the AD users have now."""
+    out = {k: {} for k, _ in BULK_ATTRS}
+    for u in users:
+        for k in out:
+            v = u["attrs"].get(k, "")
+            if v:
+                out[k][v] = out[k].get(v, 0) + 1
+    return {k: sorted(v.items(), key=lambda x: (-x[1], x[0])) for k, v in out.items()}
+
 
 class ADError(RuntimeError):
     pass
@@ -134,7 +166,8 @@ class AD:
         flt = "(&(objectCategory=person)(objectClass=user)"
         if q:
             x = ldap_ad._escape(q)
-            flt += f"(|(sAMAccountName=*{x}*)(displayName=*{x}*)(cn=*{x}*)(mail=*{x}*)(department=*{x}*))"
+            flt += (f"(|(sAMAccountName=*{x}*)(displayName=*{x}*)(cn=*{x}*)(mail=*{x}*)(department=*{x}*)(title=*{x}*)"
+                    f"(physicalDeliveryOfficeName=*{x}*)(l=*{x}*)(company=*{x}*)(ipPhone={x}))")
         flt += ")"
         return [self._user_row(e) for e in self._search(ou or self.base, flt, USER_ATTRS, limit=limit)]
 

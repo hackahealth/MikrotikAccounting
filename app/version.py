@@ -1,1 +1,1 @@
-VERSION = "1.17.0"     # 2026-10-25: Active Directory administration (internal address only), groups mapped to AD groups / OUs / offices
+VERSION = "1.18.0"     # 2026-10-26: AD attribute value lists, free Issabel extensions, bulk AD changes

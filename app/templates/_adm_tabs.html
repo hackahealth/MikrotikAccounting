@@ -1,4 +1,8 @@
 <div class="top"><h2>مدیریت Active Directory</h2></div>
 <p class="hint">این بخش فقط از آدرس داخلی سامانه دیده می‌شود. هر تغییر مستقیم در AD و با حساب سرویس تنظیمات AD انجام و در گزارش فعالیت‌ها ثبت می‌شود.</p>
-<div class="tabs">{% for k, t in [('users','کاربران'),('groups','گروه‌ها'),('ous','واحدهای سازمانی (OU)'),('computers','رایانه‌ها')] %}<a href="/adm/{{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
+<div class="tabs">{% for k, t in [('users','کاربران'),('groups','گروه‌ها'),('ous','واحدهای سازمانی (OU)'),('computers','رایانه‌ها'),('values','مقادیر انتخابی و تغییر گروهی')] %}<a href="/adm/{{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
 {% macro ou_select(name, ous, selected='', empty='') %}<select name="{{ name }}">{% if empty %}<option value="">{{ empty }}</option>{% endif %}{% for dn, n, depth in ous %}<option value="{{ dn }}" {{ 'selected' if dn|lower == selected|lower }}>{{ '— ' * depth }}{{ n }}</option>{% endfor %}</select>{% endmacro %}
+{% macro attr_field(k, label, value, choices, free_exts, name=None) %}{% set name = name or k %}
+{% if k in choices %}<select name="{{ name }}"><option value="">—</option>{% for v in choices[k] %}<option{{ ' selected' if v == value }}>{{ v }}</option>{% endfor %}{% if value and value not in choices[k] %}<option selected>{{ value }}</option>{% endif %}</select>
+{% elif k == 'ipPhone' %}<select name="{{ name }}" class="ltr"><option value="">—</option>{% if value %}<option selected>{{ value }}</option>{% endif %}{% for e, n in free_exts if e != value %}<option value="{{ e }}">{{ e }} (آزاد، {{ n }} تماس)</option>{% endfor %}</select>
+{% else %}<input name="{{ name }}" value="{{ value or '' }}" {{ 'class=ltr' if k in ('mail', 'telephoneNumber', 'mobile', 'employeeID') }}>{% endif %}{% endmacro %}

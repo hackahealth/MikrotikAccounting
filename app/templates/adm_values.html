@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_adm_tabs.html" import attr_field with context %}
+{% block content %}
+{% include "_adm_tabs.html" %}
+<style>.vals select,.vals input{width:auto;min-width:150px;max-width:220px;display:inline-block}.vals td{vertical-align:middle}</style>
+<p class="hint">مقادیری که اینجا تعریف شوند در فرم ساخت و ویرایش کاربر AD به‌صورت فهرست انتخابی می‌آیند. نام دفترها، واحدها و شهرهای صفحهٔ «دفترها و واحدها» خودکار در فهرست هستند.
+در «در حال استفاده» همهٔ مقادیری که الان کاربران AD دارند با تعداد کاربر دیده می‌شود و با «تغییر برای همه» یکجا عوض می‌شود. برای تغییر گروهی کاربران دلخواه، در فهرست کاربران آن‌ها را تیک بزنید.</p>
+{% for k, label in bulk_attrs %}
+<div class="card vals" id="{{ k }}"><h3>{{ label }}</h3>
+<div class="grid g2">
+{% if k in choices %}<div><b>فهرست انتخابی</b>
+  <div style="margin:6px 0">{% for c in defined.get(k, []) %}<form class="inline" method="post" action="/adm/values/op"><input type="hidden" name="op" value="delete"><input type="hidden" name="attr" value="{{ k }}"><input type="hidden" name="id" value="{{ c.id }}"><span class="badge">{{ c.value }} <button class="btn s d" title="حذف از فهرست">×</button></span></form> {% endfor %}
+  {% for v in choices[k] if v not in defined.get(k, [])|map(attribute='value')|list %}<span class="badge" title="از دفترها و واحدهای سامانه">{{ v }}</span> {% endfor %}</div>
+  <form method="post" action="/adm/values/op"><input type="hidden" name="op" value="add"><input type="hidden" name="attr" value="{{ k }}">
+  <textarea name="values" rows="2" placeholder="هر خط یک مقدار"></textarea><button class="btn p s">افزودن</button></form></div>
+{% elif k == 'ipPhone' %}<div><b>داخلی‌های آزاد ایزابل ({{ free_exts|length }})</b><div class="hint">داخلی‌هایی که در تماس‌ها دیده شده‌اند ولی به کسی تخصیص داده نشده و در AD هم برای کسی ثبت نیستند.</div>
+  <div style="margin:6px 0" class="ltr">{% for e, n in free_exts %}<span class="badge" title="{{ n }} تماس">{{ e }}</span> {% else %}<span class="muted">داخلی آزادی پیدا نشد</span>{% endfor %}</div></div>
+{% else %}<div></div>{% endif %}
+<div><b>در حال استفاده در AD</b>
+<table>{% for v, n in used[k] %}<tr><td>{{ v }}{% if k in choices and v not in choices[k] %} <form class="inline" method="post" action="/adm/values/op"><input type="hidden" name="op" value="add"><input type="hidden" name="attr" value="{{ k }}"><input type="hidden" name="values" value="{{ v }}"><button class="btn s" title="به فهرست انتخابی اضافه شود">+ فهرست</button></form>{% endif %}</td>
+<td><a href="/adm/users?q={{ v|urlencode }}">{{ n }} کاربر</a></td>
+<td><form class="inline" method="post" action="/adm/values/op" onsubmit="return confirm('برای همهٔ {{ n }} کاربر در AD عوض شود؟')"><input type="hidden" name="op" value="rename"><input type="hidden" name="attr" value="{{ k }}"><input type="hidden" name="old" value="{{ v }}">
+{% if k in choices or k == 'ipPhone' %}{{ attr_field(k, label, '', choices, free_exts, 'new') }}{% else %}<input name="new">{% endif %}<button class="btn s">تغییر برای همه</button></form></td></tr>
+{% else %}<tr><td class="muted">هیچ کاربری مقدار ندارد</td></tr>{% endfor %}</table></div>
+</div></div>
+{% endfor %}
+{% endblock %}

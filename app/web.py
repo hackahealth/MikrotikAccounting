@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import (access, ad_admin, alerts, ami, auth, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
-from .db import (LDAP_KEYS, AccessExempt, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
+from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
@@ -3688,6 +3688,131 @@ def _back(form, default):
     return _local(form.get("back"), default)
 
 
+def _adm_choices():
+    db = SessionLocal()
+    return {"choices": ad_admin.choices(db), "free_exts": pbx.free_extensions(db),
+            "bulk_attrs": ad_admin.BULK_ATTRS}
+
+
+def _adm_sync_many(db, sams):
+    try:
+        if sams:
+            ldap_ad.sync_users(db, list(sams))
+    except Exception as e:
+        logging.getLogger("web").warning("AD sync: %s", e)
+
+
+@app.post("/adm/users/bulk")
+async def adm_users_bulk(request: Request):
+    """One change for the users ticked on the list: an attribute, a group, the OU or enabled / disabled."""
+    form = await request.form()
+    db = SessionLocal()
+    dns, op = form.getlist("dn"), str(form.get("op", ""))
+    back = _back(form, "/adm/users")
+    if not dns:
+        flash(request, "هیچ کاربری انتخاب نشده", "err")
+        return redirect(back)
+    attr = str(form.get("attr", ""))
+    value = str(form.get("value_" + attr, "") if op == "attr" else "").strip()
+    group = str(form.get("group", ""))
+    done, errors, sams = 0, [], []
+    try:
+        with _adm(request) as ad:
+            for dn in dns:
+                try:
+                    u = ad.user(dn)
+                    if op == "attr":
+                        if attr not in dict(ad_admin.BULK_ATTRS):
+                            raise ad_admin.ADError("خصیصه نادرست است")
+                        ad.update_user(dn, {attr: value})
+                    elif op == "group_add":
+                        ad.add_member(group, dn)
+                    elif op == "group_remove":
+                        ad.remove_member(group, dn)
+                    elif op in ("enable", "disable"):
+                        ad.set_enabled(dn, op == "enable")
+                    elif op == "move":
+                        ad.move(dn, str(form.get("ou", "")))
+                    else:
+                        raise ad_admin.ADError("عملیات نادرست است")
+                    done += 1
+                    sams.append(u["sam"])
+                except Exception as e:
+                    errors.append(f"{ldap_ad._cn(dn)}: {e}")
+    except Exception as e:
+        return _adm_error(request, e, back)
+    what = {"attr": f"{dict(ad_admin.BULK_ATTRS).get(attr, attr)} = {value or '(خالی)'}",
+            "group_add": f"افزودن به {ldap_ad._cn(group)}", "group_remove": f"خروج از {ldap_ad._cn(group)}",
+            "enable": "فعال کردن", "disable": "غیرفعال کردن", "move": "انتقال OU"}.get(op, op)
+    log_action(request, "AD: تغییر گروهی کاربران", f"{what} — {', '.join(sams)[:900]}")
+    _adm_sync_many(db, sams)
+    flash(request, f"{what}: {done} کاربر انجام شد" + ("\n" + "\n".join(errors[:20]) if errors else ""),
+          "ok" if not errors else "err")
+    return redirect(back)
+
+
+@app.get("/adm/values", response_class=HTMLResponse)
+def adm_values(request: Request):
+    db = SessionLocal()
+    defined = {}
+    for c in db.query(AdChoice).order_by(AdChoice.value):
+        defined.setdefault(c.attr, []).append(c)
+    try:
+        with _adm(request) as ad:
+            used = ad_admin.used_values(ad.users(limit=0))
+    except Exception as e:
+        return render(request, "adm_error.html", error=str(e), tab="values")
+    return render(request, "adm_values.html", tab="values", defined=defined, used=used,
+                  choice_attrs=ad_admin.CHOICE_ATTRS, **_adm_choices())
+
+
+@app.post("/adm/values/op")
+async def adm_values_op(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    op, attr = str(form.get("op", "")), str(form.get("attr", ""))
+    if attr not in dict(ad_admin.BULK_ATTRS):
+        return redirect("/adm/values")
+    if op == "add":
+        n = 0
+        for v in Group._lines(form.get("values", "")):
+            if attr in dict(ad_admin.CHOICE_ATTRS) and not db.query(AdChoice).filter_by(attr=attr, value=v[:200]).first():
+                db.add(AdChoice(attr=attr, value=v[:200]))
+                n += 1
+        db.commit()
+        log_action(request, "AD: مقادیر انتخابی", f"{attr} + {form.get('values', '')}"[:500])
+        flash(request, f"{n} مقدار اضافه شد")
+    elif op == "delete":
+        c = db.get(AdChoice, _int(form.get("id")))
+        if c:
+            db.delete(c)
+            db.commit()
+            flash(request, "از فهرست حذف شد (کاربرانی که این مقدار را دارند تغییر نمی‌کنند)")
+    elif op == "rename":
+        old, new = str(form.get("old", "")), str(form.get("new", "")).strip()
+        done, errors, sams = 0, [], []
+        try:
+            with _adm(request) as ad:
+                for u in ad.users(limit=0):
+                    if u["attrs"].get(attr, "") == old:
+                        try:
+                            ad.update_user(u["dn"], {attr: new})
+                            done += 1
+                            sams.append(u["sam"])
+                        except Exception as e:
+                            errors.append(f"{u['sam']}: {e}")
+        except Exception as e:
+            return _adm_error(request, e, "/adm/values")
+        if new and attr in dict(ad_admin.CHOICE_ATTRS) and not db.query(AdChoice).filter_by(attr=attr, value=new).first():
+            db.add(AdChoice(attr=attr, value=new))
+            db.commit()
+        log_action(request, "AD: تغییر گروهی خصیصه", f"{attr}: {old} → {new or '(خالی)'} — {done} کاربر")
+        _adm_sync_many(db, sams)
+        flash(request, f"«{old}» برای {done} کاربر به «{new or 'خالی'}» تغییر کرد" +
+              ("\n" + "\n".join(errors[:20]) if errors else ""), "ok" if not errors else "err")
+    return redirect("/adm/values#" + attr)
+
+
 @app.get("/adm", response_class=HTMLResponse)
 @app.get("/adm/users", response_class=HTMLResponse)
 def adm_users(request: Request, q: str = "", ou: str = ""):
@@ -3698,7 +3823,7 @@ def adm_users(request: Request, q: str = "", ou: str = ""):
     except Exception as e:
         return render(request, "adm_error.html", error=str(e))
     return render(request, "adm_users.html", users=users, ous=ous, groups=groups, q=q, ou=ou, tab="users",
-                  editable=ad_admin.EDITABLE)
+                  editable=ad_admin.EDITABLE, **_adm_choices())
 
 
 @app.get("/adm/user", response_class=HTMLResponse)
@@ -3708,7 +3833,8 @@ def adm_user(request: Request, dn: str):
             u, ous, groups = ad.user(dn), ad.ous(), ad.groups()
     except Exception as e:
         return render(request, "adm_error.html", error=str(e))
-    return render(request, "adm_user.html", u=u, ous=ous, groups=groups, tab="users", editable=ad_admin.EDITABLE)
+    return render(request, "adm_user.html", u=u, ous=ous, groups=groups, tab="users", editable=ad_admin.EDITABLE,
+                  **_adm_choices())
 
 
 @app.post("/adm/users/create")
