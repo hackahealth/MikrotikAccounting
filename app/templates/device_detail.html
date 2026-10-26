@@ -51,7 +51,7 @@
 <div class="card tbl"><h3>اتصال‌های ثبت‌شده با این MAC (آخرین ۲۰۰)</h3><table>
 <tr><th>کاربر</th><th>سرویس</th><th>IP</th><th>شروع</th><th>پایان</th><th>مدت</th><th>دانلود</th><th>آپلود</th><th>علت قطع</th></tr>
 {% for s in sessions %}
-<tr><td>{{ s.username }}</td><td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ s.framed_ip }}</td>
+<tr><td>{{ s.username }}</td><td>{{ s.service|svc }}</td><td class="ltr">{{ s.framed_ip }}</td>
 <td>{{ s.start_time|jdt }}</td><td>{% if s.active %}<span class="badge ok">آنلاین</span>{% else %}{{ s.stop_time|jdt }}{% endif %}</td>
 <td>{{ s.session_time|duration }}</td><td class="ltr">{{ s.bytes_out|bytes }}</td><td class="ltr">{{ s.bytes_in|bytes }}</td><td class="hint">{{ s.terminate_cause }}</td></tr>
 {% else %}<tr><td colspan="9" class="muted">-</td></tr>{% endfor %}

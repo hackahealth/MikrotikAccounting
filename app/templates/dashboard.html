@@ -3,7 +3,7 @@
 <div class="top"><h2>داشبورد امروز</h2>{% if 'reports_view' in perms %}<a class="btn" href="/reports?preset=today">گزارش کامل امروز</a>{% endif %}</div>
 <div class="grid g4">
   <div class="card stat"><div class="l">کاربران آنلاین</div><div class="v">{{ stats.active }}</div>
-    <div class="hint">هات‌اسپات {{ stats.hotspot }} · VPN {{ stats.vpn }}</div></div>
+    <div class="hint">هات‌اسپات {{ stats.hotspot }} · VPN {{ stats.vpn }}{% if stats.proxy %} · پروکسی {{ stats.proxy }}{% endif %}</div></div>
   <div class="card stat"><div class="l">مصرف امروز</div><div class="v ltr">{{ rep.total|bytes }}</div>
     <div class="hint">اینترنت <span class="ltr">{{ rep.split.internet|bytes }}</span> · تانل <span class="ltr">{{ rep.split.tunnel|bytes }}</span> · داخل شبکه <span class="ltr">{{ rep.split.internal|bytes }}</span></div>
     <div class="hint">دانلود <span class="ltr">{{ rep.down|bytes }}</span> · آپلود <span class="ltr">{{ rep.up|bytes }}</span></div></div>

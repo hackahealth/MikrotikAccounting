@@ -223,8 +223,8 @@ def management(db, start: datetime, end: datetime, ids=None):
         dev[k][1] += (s.bytes_in or 0) + (s.bytes_out or 0)
         if s.user_id:
             dev[k][2].add(s.user_id)
-        svc["هات‌اسپات" if s.service == "hotspot" else "VPN"][0] += 1
-        svc["هات‌اسپات" if s.service == "hotspot" else "VPN"][1] += (s.bytes_in or 0) + (s.bytes_out or 0)
+        svc[policy.service_fa(s.service)][0] += 1
+        svc[policy.service_fa(s.service)][1] += (s.bytes_in or 0) + (s.bytes_out or 0)
     devices = sorted([{"name": k, "sessions": v[0], "bytes": v[1], "users": len(v[2])} for k, v in dev.items()],
                      key=lambda x: -x["sessions"])
     services = [{"name": k, "sessions": v[0], "bytes": v[1]} for k, v in svc.items()]
@@ -316,7 +316,7 @@ def attendance(db, start: datetime, end: datetime, ids=None):
         windows = work_windows(rules, day)
         inside = sum(_overlap(a, b, w1, w2) for a, b in merged for w1, w2 in windows)
         u = users.get(uid)
-        services = {("هات‌اسپات" if s.service == "hotspot" else "VPN") for _, _, s in segs}
+        services = {policy.service_fa(s.service) for _, _, s in segs}
         device_types = {TYPE_FA.get(s.device_type or "", "") for _, _, s in segs if s.device_type}
         rows.append({
             "user_id": uid, "username": u.username if u else "?", "full_name": u.full_name if u else "",

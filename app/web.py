@@ -24,7 +24,7 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (access, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+from . import (access, proxy, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
@@ -78,6 +78,7 @@ templates.env.filters.update({
     "mmss": lambda sec: f"{int(sec or 0) // 60}:{int(sec or 0) % 60:02d}",
     "jdate": lambda d: jalali.to_jalali_str(d), "jdt": lambda d: jalali.to_jalali_str(d, True),
     "devtype": lambda t: devices.TYPE_FA.get(t or "", t), "fa": lambda s: str(s).translate(FA_DIGITS),
+    "svc": policy.service_fa,
 })
 templates.env.globals.update({"CATEGORIES": classifier.CATEGORIES, "ROLES": auth.ROLES, "VERSION": VERSION,
                               "DEVICE_TYPES": devices.TYPES})
@@ -517,7 +518,7 @@ def dashboard(request: Request):
     stats = {
         "users": uq.count(), "enabled": uq.filter(User.enabled.is_(True)).count(),
         "active": len(active), "hotspot": sum(1 for s in active if s.service == "hotspot"),
-        "vpn": sum(1 for s in active if s.service == "vpn"),
+        "vpn": sum(1 for s in active if s.service == "vpn"), "proxy": sum(1 for s in active if s.service == "proxy"),
         "rejects": _auth_q(db, ids).filter(AuthLog.ts >= today, AuthLog.result == "reject").count(),
     }
     return render(request, "dashboard.html", rep=rep, stats=stats, by_dev=by_dev, routers=jobs.live["routers"],
@@ -3483,6 +3484,47 @@ async def routeros_delete_npk(request: Request):
     return redirect("/routeros")
 
 
+# ------------------------------------------------------------------ authenticating proxy (shared RDP servers)
+@app.get("/proxy", response_class=HTMLResponse)
+def proxy_page(request: Request):
+    db = SessionLocal()
+    st = proxy.settings(db)
+    stale = now() - timedelta(seconds=config.ACCT_INTERIM * 3 + 300)
+    live = db.query(AcctSession).filter(AcctSession.service == "proxy", AcctSession.active.is_(True),
+                                        AcctSession.last_update >= stale).order_by(AcctSession.username).all()
+    fails = db.query(AuthLog).filter(AuthLog.service == "proxy").order_by(AuthLog.ts.desc()).limit(30).all()
+    return render(request, "proxy.html", st=st, status=proxy.server.status(), live=live, fails=fails,
+                  host=request.url.hostname or "IP-سرور-برنامه",
+                  internal=get_setting(db, "internal_ranges", access.DEFAULT_INTERNAL))
+
+
+@app.post("/proxy/save")
+async def proxy_save(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    port = _int(str(form.get("proxy_port", "3128")).translate(FA_TO_EN), 0)
+    if not 1 <= port <= 65535:
+        flash(request, "پورت نادرست است", "err")
+        return redirect("/proxy")
+    clients = str(form.get("proxy_clients", "")).strip()
+    bad = netscope.parse_ranges(clients)[1]
+    if bad:
+        flash(request, "آدرس نادرست: " + "، ".join(bad[:5]), "err")
+        return redirect("/proxy")
+    set_setting(db, "proxy_enabled", "1" if form.get("proxy_enabled") else "0")
+    set_setting(db, "proxy_port", str(port))
+    set_setting(db, "proxy_clients", clients)
+    db.commit()
+    log_action(request, "تنظیم پروکسی", f"{'روشن' if form.get('proxy_enabled') else 'خاموش'} پورت {port}")
+    await run_in_threadpool(proxy.server.apply_settings)
+    stt = proxy.server.status()
+    if form.get("proxy_enabled") and stt["error"]:
+        flash(request, f"ذخیره شد ولی پروکسی روی پورت {port} باز نشد: {stt['error']}", "err")
+    else:
+        flash(request, "ذخیره شد" + (f" — پروکسی روی پورت {port} فعال است" if stt["running"] else ""))
+    return redirect("/proxy")
+
+
 # ------------------------------------------------------------------ access control (sites, internal destinations, exempt)
 @app.get("/access", response_class=HTMLResponse)
 def access_page(request: Request):
@@ -3675,8 +3717,27 @@ def winlogons_page(request: Request, q: str = "", frm: str = "", to: str = ""):
 def messages_page(request: Request):
     db = SessionLocal()
     sent = db.query(AuditLog).filter(AuditLog.action == "پیام به رایانه‌ها").order_by(AuditLog.ts.desc()).limit(30).all()
+    auto = db.query(AuditLog).filter(AuditLog.action == "پیام خودکار حجم").order_by(AuditLog.ts.desc()).limit(30).all()
     return render(request, "messages.html", routers=db.query(Nas).order_by(Nas.name).all(), sent=sent,
-                  available=winmsg.available(), result=request.session.pop("msg_result", None))
+                  available=winmsg.available(), result=request.session.pop("msg_result", None), auto=auto,
+                  qm=quotamsg.settings(db), warn_pct=policy.warn_pct(db))
+
+
+@app.post("/messages/auto")
+async def messages_auto(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    set_setting(db, "quota_msg_enabled", "1" if form.get("quota_msg_enabled") else "0")
+    set_setting(db, "quota_msg_extra", str(form.get("quota_msg_extra", "")).strip()[:300])
+    try:
+        set_setting(db, "quota_warn_pct", str(max(1, min(100, int(str(form.get("quota_warn_pct", "80"))
+                                                                 .translate(FA_TO_EN))))))
+    except ValueError:
+        pass
+    db.commit()
+    log_action(request, "تنظیم پیام خودکار حجم", "روشن" if form.get("quota_msg_enabled") else "خاموش")
+    flash(request, "ذخیره شد")
+    return redirect("/messages")
 
 
 @app.post("/messages/send")

@@ -103,6 +103,13 @@ class Effective:
         self.address_list = g.address_list if g else ""
 
 
+SERVICE_FA = {"hotspot": "هات‌اسپات", "vpn": "VPN", "proxy": "پروکسی"}
+
+
+def service_fa(service) -> str:
+    return SERVICE_FA.get(service or "", service or "-")
+
+
 def period_start(period: str, ref: datetime = None) -> datetime:
     ref = ref or now()
     today = ref.date()
@@ -186,7 +193,7 @@ def quota_warning(db, user: User):
 def active_session_count(db, user: User, exclude_mac: str = "") -> int:
     stale = now() - timedelta(seconds=config.ACCT_INTERIM * 3 + 60)
     q = db.query(AcctSession).filter(AcctSession.user_id == user.id, AcctSession.active.is_(True),
-                                     AcctSession.last_update >= stale)
+                                     AcctSession.last_update >= stale, AcctSession.service != "proxy")
     if exclude_mac:
         q = q.filter(AcctSession.mac != exclude_mac)
     return q.count()
@@ -221,7 +228,7 @@ def check_access(db, user: User, service: str, mac: str = "", when: datetime = N
         quota = remaining = None                  # temporary free internet: no quota
     if quota is not None and remaining <= 0:
         return False, "حجم مجاز تمام شده", {}
-    if eff.simultaneous_use and active_session_count(db, user, exclude_mac=mac) >= eff.simultaneous_use:
+    if service != "proxy" and eff.simultaneous_use and active_session_count(db, user, exclude_mac=mac) >= eff.simultaneous_use:
         return False, "تعداد اتصال همزمان بیش از حد مجاز", {}
 
     attrs = {"Acct-Interim-Interval": config.ACCT_INTERIM}

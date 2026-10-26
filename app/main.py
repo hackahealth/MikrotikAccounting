@@ -32,6 +32,8 @@ def main():
     if config.ENABLE_NETFLOW:
         from .netflow import collector
         collector.start()
+    from . import proxy
+    proxy.start()                       # listens only when turned on in the panel
     if config.ENABLE_SCHEDULER:
         from . import jobs
         jobs.start()

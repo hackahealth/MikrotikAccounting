@@ -19,11 +19,13 @@ def available():
     return os.name == "nt" and bool(shutil.which("msg"))
 
 
-def send_one(ip, text, seconds=300):
+def send_one(ip, text, seconds=300, who="*"):
+    """who: '*' = every session of that computer, or a Windows username = only that user's session (a shared RDP
+    server)."""
     if not available():
         return False, "msg.exe فقط روی سرور ویندوزی برنامه در دسترس است"
     try:
-        r = subprocess.run(["msg", "*", f"/server:{ip}", f"/time:{int(seconds)}", text], capture_output=True,
+        r = subprocess.run(["msg", who or "*", f"/server:{ip}", f"/time:{int(seconds)}", text], capture_output=True,
                            timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)[:150]

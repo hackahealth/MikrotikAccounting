@@ -37,6 +37,7 @@
   {% if 'devices_view' in perms %}<a href="/winlogons" class="{{ 'on' if p.startswith('/winlogons') }}">ورود کاربران ویندوز</a>{% endif %}
   {% if 'ad_message' in perms %}<a href="/messages" class="{{ 'on' if p.startswith('/messages') }}">پیام به رایانه‌ها</a>{% endif %}
   {% if 'access_manage' in perms %}<a href="/access" class="{{ 'on' if p.startswith('/access') }}">کنترل دسترسی و سایت‌ها</a>{% endif %}
+  {% if 'access_manage' in perms %}<a href="/proxy" class="{{ 'on' if p.startswith('/proxy') }}">پروکسی سرورهای RDP</a>{% endif %}
   {% if 'router_admin' in perms %}<a href="/routeros" class="{{ 'on' if p.startswith('/routeros') }}">نسخه و بروزرسانی روترها</a>{% endif %}
   {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') and not p.startswith('/adm/') and p != '/adm' }}">Active Directory</a>{% endif %}
   {% if 'ad_admin' in perms %}<a href="/adm" class="{{ 'on' if p == '/adm' or p.startswith('/adm/') }}">مدیریت Active Directory</a>{% endif %}

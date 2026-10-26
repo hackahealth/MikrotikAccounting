@@ -2651,3 +2651,166 @@ def test_issabel_administration_through_api(env, monkeypatch):
     db.commit()
     db.close()
     fake.srv.shutdown()
+
+
+def test_authenticating_proxy_and_quota_messages(env, monkeypatch):
+    """Shared RDP server: each user signs in to the proxy (407 first), traffic is counted per user into proxy sessions,
+    blocked sites and an exhausted quota answer 403 and open connections are cut; automatic Windows messages when the
+    quota passes the warning percent and when it runs out (once per level), to only that user's RDP session."""
+    import base64
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from app import access, proxy, quotamsg
+    from datetime import timedelta
+
+    from app.db import AuditLog, AuthLog, SiteRule, now, set_setting
+    from app.web import app
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"x" * 200000
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    web = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=web.serve_forever, daemon=True).start()
+    echo = socket.socket()
+    echo.bind(("127.0.0.1", 0))
+    echo.listen(5)
+
+    def echo_loop():
+        while True:
+            c, _ = echo.accept()
+            def one(c=c):
+                while True:
+                    d = c.recv(65536)
+                    if not d:
+                        break
+                    c.sendall(d)
+                c.close()
+            threading.Thread(target=one, daemon=True).start()
+    threading.Thread(target=echo_loop, daemon=True).start()
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    db = SessionLocal()
+    g = Group(name="RDP کم‌حجم", quota_mb=1, quota_period="monthly", simultaneous_use=1)
+    db.add(g)
+    db.add(User(username="rdp.user", full_name="کاربر RDP", password_enc=encrypt("Rdp-Pass1"), group=g))
+    db.add(SiteRule(pattern="blocked.example", action="block"))
+    set_setting(db, "proxy_enabled", "1")
+    set_setting(db, "proxy_port", str(port))
+    set_setting(db, "proxy_clients", "10.9.9.9")
+    set_setting(db, "quota_warn_pct", "10")
+    db.commit()
+    access.invalidate()
+    px = proxy.Proxy()
+    px.start()
+    px.apply_settings()
+    assert px.status()["running"]
+
+    def ask(head, body=b""):
+        c = socket.create_connection(("127.0.0.1", port), timeout=5)
+        c.sendall(head.encode() + body)
+        data = b""
+        while True:
+            try:
+                d = c.recv(65536)
+            except socket.timeout:
+                break
+            if not d:
+                break
+            data += d
+        c.close()
+        return data
+
+    def cred(u, p):
+        return "Proxy-Authorization: Basic " + base64.b64encode(f"{u}:{p}".encode()).decode() + "\r\n"
+    url = f"http://127.0.0.1:{web.server_port}/file"
+    r = ask(f"GET {url} HTTP/1.1\r\nHost: x\r\n\r\n")
+    assert r.startswith(b"HTTP/1.1 407") and b'Proxy-Authenticate: Basic realm="Internet"' in r
+    r = ask(f"GET {url} HTTP/1.1\r\nHost: x\r\n{cred('rdp.user', 'wrong')}\r\n")
+    assert r.startswith(b"HTTP/1.1 407")
+    ok = cred("CORP\\rdp.user", "Rdp-Pass1")
+    r = ask(f"GET {url} HTTP/1.1\r\nHost: x\r\n{ok}\r\n")
+    assert r.startswith(b"HTTP/1.0 200") and len(r) > 200000
+    # HTTPS-style tunnel
+    c = socket.create_connection(("127.0.0.1", port), timeout=5)
+    c.sendall(f"CONNECT 127.0.0.1:{echo.getsockname()[1]} HTTP/1.1\r\n{ok}\r\n".encode())
+    assert c.recv(100).startswith(b"HTTP/1.1 200 Connection established")
+    c.sendall(b"hello" * 1000)
+    got = b""
+    while len(got) < 5000:
+        got += c.recv(65536)
+    assert got == b"hello" * 1000
+    r = ask(f"CONNECT www.blocked.example:443 HTTP/1.1\r\n{ok}\r\n")
+    assert r.startswith(b"HTTP/1.1 403") and "مسدود".encode() in r
+    px.flush()
+    db = SessionLocal()
+    uid = db.query(User).filter(User.username == "rdp.user").one().id
+    s = db.query(AcctSession).filter(AcctSession.user_id == uid, AcctSession.service == "proxy").one()
+    assert s.active and s.nas_ip == "proxy" and s.called_station == "127.0.0.1"
+    assert s.bytes_out > 205000 and s.bytes_in > 5000
+    assert db.query(SpeedSample).filter(SpeedSample.session_id == s.id).count() == 1
+    logs = db.query(AuthLog).filter(AuthLog.service == "proxy").all()
+    assert [x.result for x in logs] == ["reject", "accept"] and logs[1].username == "rdp.user"
+    # a user on the shared server does not count as a simultaneous session for hotspot/VPN
+    from app import policy
+    assert policy.active_session_count(db, db.get(User, uid)) == 0
+    # automatic quota message: 20% used -> one warning to the user's own session on the RDP server
+    sent = []
+    monkeypatch.setattr(quotamsg.winmsg, "targets", lambda db, mode, value: [])
+    db.query(AcctSession).filter(AcctSession.user_id != uid).update(
+        {"active": False, "last_update": now() - timedelta(hours=1)})
+    db.commit()
+    res = quotamsg.check(db, send=lambda ip, text, who: sent.append((ip, text, who)) or (True, ""))
+    assert res == [("rdp.user", "warn", 1)] and sent[0][0] == "127.0.0.1" and sent[0][2] == "rdp.user"
+    assert "کاربر RDP" in sent[0][1]
+    assert quotamsg.check(db, send=lambda ip, text, who: sent.append(1) or (True, "")) == [] and len(sent) == 1
+    db.close()
+    # quota runs out on the next download: the open tunnel is cut and new requests answer 403
+    c2 = socket.create_connection(("127.0.0.1", port), timeout=5)
+    c2.sendall(f"CONNECT 127.0.0.1:{echo.getsockname()[1]} HTTP/1.1\r\n{ok}\r\n".encode())
+    assert c2.recv(100).startswith(b"HTTP/1.1 200")
+    for _ in range(5):
+        ask(f"GET {url} HTTP/1.1\r\nHost: x\r\n{ok}\r\n")
+    px.flush()
+    time.sleep(0.3)
+    assert c2.recv(10) == b""
+    r = ask(f"GET {url} HTTP/1.1\r\nHost: x\r\n{ok}\r\n")
+    assert r.startswith(b"HTTP/1.1 403") and "حجم مجاز تمام شده".encode() in r
+    db = SessionLocal()
+    res = quotamsg.check(db, send=lambda ip, text, who: sent.append((ip, text, who)) or (True, ""))
+    assert res == [("rdp.user", "err", 1)] and "تمام شده" in sent[-1][1] and "IT" in sent[-1][1]
+    assert db.query(AuditLog).filter(AuditLog.action == "پیام خودکار حجم").count() == 2
+    # only allowed computers may use it
+    assert px._client_ok("10.9.9.9") and not px._client_ok("10.9.9.8") and px._client_ok("127.0.0.1")
+    db.close()
+    # panel pages
+    tc = TestClient(app)
+    tc.post("/login", data={"username": "admin", "password": "Secret12345"})
+    page = tc.get("/proxy").text
+    assert "پروکسی سرورهای RDP" in page and "rdp.user" in page and "RDP only via proxy" in page
+    assert "پیام خودکار حجم" in tc.get("/messages").text
+    r = tc.post("/proxy/save", data={"proxy_port": "abc"}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+    r = tc.post("/messages/auto", data={"quota_msg_extra": "تماس: داخلی ۱۲۰", "quota_warn_pct": "85"},
+                follow_redirects=False)
+    db = SessionLocal()
+    from app.db import get_setting
+    assert get_setting(db, "quota_msg_enabled") == "0" and get_setting(db, "quota_warn_pct") == "85"
+    assert "پروکسی" in tc.get("/reports?service=proxy").text
+    db.close()
+    set_setting_db = SessionLocal()
+    set_setting(set_setting_db, "proxy_enabled", "0")
+    set_setting_db.commit()
+    set_setting_db.close()
+    px.apply_settings()
+    assert not px.status()["running"]
+    web.shutdown()

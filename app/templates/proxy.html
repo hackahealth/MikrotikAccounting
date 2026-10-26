@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>پروکسی سرورهای RDP</h2></div>
+<div class="card">
+<p class="hint">روی سرورهای RDP / ترمینال همهٔ کاربران با یک IP به اینترنت می‌روند و روتر نمی‌تواند آن‌ها را از هم جدا کند. مرورگرهای آن سرورها از این پروکسی استفاده می‌کنند؛ هر کاربر یک بار نام کاربری و رمز ویندوز (دامنه) خود را وارد می‌کند و از آن به بعد حجم، ساعات مجاز، قفل و سایت‌های مسدود دقیقاً مثل هات‌اسپات برای همان کاربر حساب و اعمال می‌شود. اتصال‌ها با سرویس «پروکسی» در گزارش‌ها و کاربران آنلاین دیده می‌شوند.</p>
+<form method="post" action="/proxy/save">
+<label><input type="checkbox" name="proxy_enabled" value="1" {{ 'checked' if st.enabled }}> پروکسی فعال باشد</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>پورت</label><input name="proxy_port" class="ltr" size="6" value="{{ st.port }}"></div>
+  <div class="fg"><label>وضعیت</label><div>{% if status.running %}<span class="badge ok">در حال کار روی پورت {{ status.port }}</span> {{ status.users }} کاربر · {{ status.conns }} اتصال باز{% elif status.error %}<span class="badge err">خطا</span> <span class="hint ltr">{{ status.error }}</span>{% else %}<span class="badge">خاموش</span>{% endif %}</div></div>
+</div>
+<div class="fg"><label>رایانه‌هایی که اجازهٔ استفاده دارند (IP سرورهای RDP؛ هر خط یکی؛ خالی = همهٔ بازه‌های داخلی)</label><textarea name="proxy_clients" class="ltr" rows="3" placeholder="192.168.1.20&#10;192.168.1.21">{{ st.clients }}</textarea></div>
+<button class="btn p">ذخیره</button>
+</form>
+</div>
+
+<div class="card">
+<h3>تنظیم ویندوز (GPO روی سرورهای RDP)</h3>
+<p class="hint">در Group Policy یک GPO به OU سرورهای RDP لینک کنید (با Loopback Processing = Merge تا تنظیمات کاربری روی همان سرور اعمال شود): User Configuration ‹ Preferences ‹ Control Panel Settings ‹ Internet Settings ‹ New ‹ Internet Explorer 10، تب Connections ‹ LAN settings:</p>
+<div class="code ltr">Proxy server: {{ host }}   Port: {{ st.port }}
+Bypass proxy server for local addresses: ✓
+Exceptions: 192.168.*;10.*;172.16.*;*.corp.local;localhost</div>
+<p class="hint">کروم و Edge همین تنظیم ویندوز را می‌خوانند. فایرفاکس: Settings ‹ Network Settings ‹ Use system proxy settings. بار اول مرورگر پنجرهٔ ورود نشان می‌دهد؛ نام کاربری بدون دامنه هم قبول است (<span class="ltr">m.karimi</span> یا <span class="ltr">CORP\m.karimi</span>). مرورگر رمز را تا بسته شدن نگه می‌دارد؛ با «ذخیرهٔ رمز» دیگر پرسیده نمی‌شود.</p>
+<h3>تنظیم میکروتیک</h3>
+<p class="hint">تا کاربران سرور RDP نتوانند بدون پروکسی بیرون بروند: IP سرور RDP و سرور برنامه را در «استثناها» (صفحهٔ کنترل دسترسی) بگذارید تا هات‌اسپات لاگین نخواهد، بعد فقط ترافیک مستقیم سرور RDP به اینترنت را ببندید:</p>
+<div class="code ltr">/ip firewall address-list add list=internal address=10.0.0.0/8
+/ip firewall address-list add list=internal address=172.16.0.0/12
+/ip firewall address-list add list=internal address=192.168.0.0/16
+/ip firewall filter add chain=forward src-address=RDP_SERVER_IP dst-address-list=!internal action=drop comment="RDP only via proxy" place-before=0</div>
+<p class="hint">سرور برنامه خودش باید به اینترنت دسترسی داشته باشد (پروکسی از طرف کاربران وصل می‌شود). اگر سرور برنامه پشت هات‌اسپات است، آن را هم در استثناها بگذارید. پورت {{ st.port }} را در فایروال ویندوز سرور برنامه برای IP سرورهای RDP باز کنید:</p>
+<div class="code ltr">New-NetFirewallRule -DisplayName "Accounting proxy" -Direction Inbound -Protocol TCP -LocalPort {{ st.port }} -RemoteAddress RDP_SERVER_IP -Action Allow</div>
+</div>
+
+<div class="card tbl"><h3>کاربران فعال پروکسی</h3><table><tr><th>کاربر</th><th>رایانه</th><th>شروع</th><th>آخرین فعالیت</th><th>دانلود</th><th>آپلود</th></tr>
+{% for s in live %}<tr><td><a href="/users?q={{ s.username }}">{{ s.username }}</a></td><td class="ltr">{{ s.called_station }}</td><td>{{ s.start_time|jdt }}</td><td>{{ s.last_update|jdt }}</td><td class="ltr">{{ s.bytes_out|bytes }}</td><td class="ltr">{{ s.bytes_in|bytes }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">کسی از پروکسی استفاده نمی‌کند</td></tr>{% endfor %}</table></div>
+
+<div class="card tbl"><h3>ورودهای اخیر به پروکسی</h3><table><tr><th>زمان</th><th>کاربر</th><th>رایانه</th><th>نتیجه</th><th>علت</th></tr>
+{% for l in fails %}<tr><td>{{ l.ts|jdt }}</td><td class="ltr">{{ l.username }}</td><td class="ltr">{{ l.mac }}</td><td>{% if l.result == 'accept' %}<span class="badge ok">پذیرفته</span>{% else %}<span class="badge err">رد</span>{% endif %}</td><td class="wrap">{{ l.reason }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">-</td></tr>{% endfor %}</table></div>
+{% endblock %}

@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import timedelta
 
-from . import (access, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
+from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
                netscope, nightlist, pbx, pingcheck, policy, retention, routeros, security, wancheck)
 from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
@@ -38,7 +38,7 @@ def enforce():
                 nas_by_ip.setdefault(n.api_host, n)
         for s in db.query(AcctSession).filter(AcctSession.active.is_(True)).all():
             user = db.get(User, s.user_id) if s.user_id else None
-            if user is None:
+            if user is None or s.service == "proxy":          # the proxy cuts its own users
                 continue
             eff = policy.Effective(user)
             reason = ""
@@ -273,5 +273,6 @@ def start():
     _every(config.LOGON_SYNC_EVERY, logons.sync_dcs)
     _every(60, nightlist.job)
     _every(60, access.job)
+    _every(quotamsg.EVERY, quotamsg.job)
     threading.Thread(target=pingcheck.job, daemon=True, name="job-pingcheck").start()
     _every(86400, cleanup)

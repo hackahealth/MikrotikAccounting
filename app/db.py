@@ -152,6 +152,8 @@ class User(Base):
     created_at = Column(DateTime, default=now)
     last_login = Column(DateTime, nullable=True)
     usage_reset_at = Column(DateTime, nullable=True)      # manual quota reset point
+    quota_msg_level = Column(String(10), default="")      # automatic quota message sent: warn | err
+    quota_msg_at = Column(DateTime, nullable=True)
 
 
 class Nas(Base):

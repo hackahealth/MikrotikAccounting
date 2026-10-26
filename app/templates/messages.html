@@ -17,6 +17,18 @@
 <p class="hint">پیام با msg.exe از سرور برنامه به IP رایانه فرستاده می‌شود و روی صفحهٔ کاربر باز می‌شود. رایانه‌ها باید اجازه بدهند (یک بار با GPO):
 رجیستری <span class="ltr">HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server</span> مقدار DWORD <span class="ltr">AllowRemoteRPC = 1</span>،
 و در فایروال ویندوز قانون «File and Printer Sharing (SMB-In)» برای IP سرور برنامه باز باشد. برای پیام هنگام ورود به ویندوز از صفحهٔ «دستگاه‌ها» استفاده کنید.</p></div>
+<div class="card"><h3>پیام خودکار حجم</h3>
+<form method="post" action="/messages/auto">
+<label><input type="checkbox" name="quota_msg_enabled" value="1" {{ 'checked' if qm.enabled }}> وقتی مصرف کاربری از حد هشدار گذشت و وقتی حجمش تمام شد، خودکار پیام روی رایانه‌اش باز شود (هر کدام یک بار در هر دورهٔ حجم)</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>حد هشدار (درصد مصرف)</label><input name="quota_warn_pct" class="ltr" size="4" value="{{ warn_pct }}"></div>
+  <div class="fg" style="grid-column:span 2"><label>جملهٔ اضافه در پیام تمام شدن حجم</label><input name="quota_msg_extra" value="{{ qm.extra }}"></div>
+</div>
+<button class="btn p">ذخیره</button>
+</form>
+<p class="hint">پیام به رایانه‌ای می‌رود که کاربر الان با آن آنلاین است: IP هات‌اسپات او، رایانه‌هایی که با نام او وارد ویندوز شده، و برای کاربران پروکسی فقط به نشست خود او روی سرور RDP (نه همهٔ کاربران آن سرور).</p>
+{% if auto %}<table><tr><th>زمان</th><th>شرح</th></tr>{% for a in auto %}<tr><td>{{ a.ts|jdt }}</td><td class="wrap">{{ a.detail }}</td></tr>{% endfor %}</table>{% endif %}
+</div>
 {% if result %}<div class="card tbl"><h3>نتیجهٔ آخرین ارسال</h3><table><tr><th>رایانه</th><th>IP</th><th>نتیجه</th></tr>
 {% for label, ip, ok, err in result %}<tr><td>{{ label }}</td><td class="ltr">{{ ip }}</td><td>{% if ok %}<span class="badge ok">رسید</span>{% else %}<span class="badge err">ناموفق</span> <span class="hint ltr">{{ err }}</span>{% endif %}</td></tr>{% endfor %}</table></div>{% endif %}
 <div class="card tbl"><h3>پیام‌های اخیر</h3><table><tr><th>زمان</th><th>فرستنده</th><th>شرح</th></tr>

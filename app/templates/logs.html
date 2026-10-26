@@ -9,7 +9,7 @@
 {% for l in items %}
 <tr><td>{{ l.ts|jdt }}</td><td>{{ l.username }}</td>
 <td>{% if l.result == 'accept' %}<span class="badge ok">موفق</span>{% else %}<span class="badge err">ناموفق</span>{% endif %}</td>
-<td class="wrap">{{ l.reason }}</td><td>{{ 'هات‌اسپات' if l.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ l.method }}</td>
+<td class="wrap">{{ l.reason }}</td><td>{{ l.service|svc }}</td><td class="ltr">{{ l.method }}</td>
 <td class="ltr">{{ l.mac }}</td><td class="ltr">{{ l.nas_ip }}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">لاگی نیست</td></tr>{% endfor %}
 </table></div>

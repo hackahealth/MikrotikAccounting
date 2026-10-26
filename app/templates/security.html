@@ -46,7 +46,7 @@
 <div class="card"><h3>آخرین ورودهای ناموفق</h3><div class="tbl" style="max-height:420px;overflow:auto"><table>
 <tr><th>زمان</th><th>کاربر</th><th>علت</th><th>سرویس</th><th>مبدأ</th><th>روتر</th></tr>
 {% for l in f.recent %}
-<tr><td>{{ l.ts|jdt }}</td><td class="ltr">{{ l.username }}</td><td class="wrap">{{ l.reason }}</td><td>{{ 'هات‌اسپات' if l.service == 'hotspot' else 'VPN' }}</td><td class="ltr">{{ l.mac }}</td><td class="ltr">{{ l.nas_ip }}</td></tr>
+<tr><td>{{ l.ts|jdt }}</td><td class="ltr">{{ l.username }}</td><td class="wrap">{{ l.reason }}</td><td>{{ l.service|svc }}</td><td class="ltr">{{ l.mac }}</td><td class="ltr">{{ l.nas_ip }}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">موردی نیست</td></tr>{% endfor %}
 </table></div></div>
 

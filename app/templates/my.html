@@ -49,7 +49,7 @@
 
 <div class="card" data-tour="sessions"><h3>اتصال‌های اخیر</h3><div class="tbl" style="max-height:420px;overflow:auto"><table>
 <tr><th>سرویس</th><th>ورود</th><th>خروج</th><th>مدت</th><th>دستگاه</th><th>IP</th><th>دانلود</th><th>آپلود</th></tr>
-{% for s in rep.sessions %}<tr><td>{{ 'هات‌اسپات' if s.service == 'hotspot' else 'VPN' }}</td><td>{{ s.start_time|jdt }}</td>
+{% for s in rep.sessions %}<tr><td>{{ s.service|svc }}</td><td>{{ s.start_time|jdt }}</td>
 <td>{{ s.stop_time|jdt if s.stop_time else 'آنلاین' }}</td><td>{{ s.session_time|duration }}</td><td>{{ s.device_type|devtype }} <span class="hint">{{ s.device_os }}</span></td>
 <td class="ltr">{{ s.framed_ip }}</td><td class="ltr">{{ s.bytes_out|bytes }}</td><td class="ltr">{{ s.bytes_in|bytes }}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">اتصالی ثبت نشده</td></tr>{% endfor %}</table></div></div>

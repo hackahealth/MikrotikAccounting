@@ -117,6 +117,7 @@ ROUTES = [
     ("GET", r"/grants", "grants_manage"), ("POST", r"/grants/.*", "grants_manage"),
     ("GET", r"/data", "data_manage"), ("POST", r"/data/.*", "data_manage"),
     ("GET", r"/routeros", "router_admin"), ("POST", r"/routeros/.*", "router_admin"),
+    ("GET", r"/proxy", "access_manage"), ("POST", r"/proxy/save", "access_manage"),
     ("GET", r"/access(/preview/\d+)?", "access_manage"), ("POST", r"/access/.*", "access_manage"),
     ("GET", r"/winlogons", "devices_view"),
     ("GET", r"/messages", "ad_message"), ("POST", r"/messages/.*", "ad_message"),
