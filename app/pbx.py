@@ -294,6 +294,8 @@ def sync_all():
         all_ranges = [parse_ranges(s.ext_ranges) for s in db.query(PbxServer).all()]
         owners = Owners(db)
         for s in servers:
+            if not s.db_user:            # administration through the API only: no CDR database to read
+                continue
             try:
                 n = sync_server(db, s, all_ranges, owners)
                 s.last_error = ""

@@ -23,7 +23,7 @@
   <div class="fg"><label>آدرس سرور (IP)</label><input name="host" class="ltr" value="{{ edit.host or '' }}" required></div>
   <div class="fg"><label>پورت MySQL</label><input name="port" class="ltr" value="{{ edit.port or 3306 }}"></div>
   <div class="fg"><label>نام دیتابیس</label><input name="db_name" class="ltr" value="{{ edit.db_name or 'asteriskcdrdb' }}"></div>
-  <div class="fg"><label>کاربر MySQL (فقط‌خواندنی)</label><input name="db_user" class="ltr" value="{{ edit.db_user or '' }}" placeholder="acct_reader"></div>
+  <div class="fg"><label>کاربر MySQL (فقط‌خواندنی)</label><input name="db_user" class="ltr" value="{{ edit.db_user or '' }}" placeholder="acct_reader"><div class="hint">خالی = گزارش تماس خوانده نمی‌شود (فقط مدیریت با API)</div></div>
   <div class="fg"><label>رمز {{ '(خالی = بدون تغییر)' if edit.id }}</label><input name="db_password" type="password" class="ltr" autocomplete="new-password"></div>
   <div class="fg"><label>بازه شماره داخلی‌ها</label><input name="ext_ranges" class="ltr" value="{{ edit.ext_ranges or '' }}" placeholder="100-399, 5000-5099">
     <div class="hint">خالی = هر شماره ۲ تا ۵ رقمی داخلی است.</div></div>
