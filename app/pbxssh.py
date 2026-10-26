@@ -125,7 +125,7 @@ F=/etc/asterisk/manager_custom.conf
 $SUDO touch "$F"
 $SUDO cp "$F" "$F.macc-bak"
 $SUDO awk 'BEGIN{{skip=0}} /^\\[/{{skip=($0=="[{AMI_USER}]")}} !skip' "$F.macc-bak" | $SUDO tee "$F" >/dev/null
-printf '\\n[{AMI_USER}]\\nsecret = %s\\ndeny = 0.0.0.0/0.0.0.0\\npermit = %s/255.255.255.255\\nread = call,reporting,agent\\nwrite =\\n' "$AMIPW" "$APP" | $SUDO tee -a "$F" >/dev/null
+printf '\\n[{AMI_USER}]\\nsecret = %s\\ndeny = 0.0.0.0/0.0.0.0\\npermit = %s/255.255.255.255\\nread = call,reporting,agent\\nwrite = reporting\\n' "$AMIPW" "$APP" | $SUDO tee -a "$F" >/dev/null
 $SUDO chown asterisk:asterisk "$F" 2>/dev/null
 if $SUDO asterisk -rx "manager reload" >/dev/null 2>&1; then echo "OK ami کاربر {AMI_USER} ساخته و AMI دوباره خوانده شد"
 else echo "ERR ami asterisk -rx 'manager reload' ناموفق بود"; fi

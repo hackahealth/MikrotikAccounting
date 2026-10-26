@@ -111,4 +111,7 @@ def test(server):
         n = len(channels(server))
         return True, f"اتصال AMI برقرار است؛ {n} کانال فعال"
     except Exception as e:  # noqa: BLE001
-        return False, f"اتصال AMI ناموفق: {e}"
+        hint = (" — کاربر AMI اجازهٔ write = reporting ندارد (در manager_custom.conf اضافه و "
+                "asterisk -rx \"manager reload\" را اجرا کنید، یا تنظیم خودکار SSH را دوباره بزنید)"
+                if "Permission denied" in str(e) else "")
+        return False, f"اتصال AMI ناموفق: {e}{hint}"
