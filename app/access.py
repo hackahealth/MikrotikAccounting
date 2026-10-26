@@ -116,7 +116,9 @@ def exempt_for(db, nas):
             ips.add(e.value)
     types = settings(db)["exempt_types"]
     if types:
-        for d in db.query(Device).filter(Device.device_type.in_(types), Device.last_nas_id == nas.id):
+        # every router gets them, not only the one that saw the device last: a phone seen by two routers (L2 tunnel,
+        # roaming) would otherwise lose its bypass every time it is seen by the other one
+        for d in db.query(Device).filter(Device.device_type.in_(types)):
             macs.add(d.mac)
     for d in db.query(Device).filter(Device.mac.in_(macs or {"-"}), Device.last_ip != ""):
         ips.add(d.last_ip)                  # MAC exempt -> its current IP is free of the firewall limits too
@@ -220,6 +222,24 @@ def _mine(item):
     return str(item.get("comment", "")).startswith(TAG)
 
 
+def _val(v):
+    if v is True:
+        return "yes"
+    if v is False:
+        return "no"
+    return str(v if v is not None else "").lower()
+
+
+def _same(item, rule):
+    """A rule on the router is the planned one (the values the panel sets)."""
+    return all(_val(item.get(k)) == _val(v) for k, v in rule.items())
+
+
+def _bkey(b):
+    return (devices.normalize_mac(str(b.get("mac-address") or "")) or "", str(b.get("address") or ""),
+            _val(b.get("type")))
+
+
 def apply(db, nas, remove_only=False):
     """Brings the router's macc items to the plan. Returns a short summary."""
     plan = {"lists": {}, "filter": [], "nat": [], "bindings": []} if remove_only else desired(db, nas)
@@ -247,7 +267,10 @@ def apply(db, nas, remove_only=False):
         for path, rules in ((("ip", "firewall", "filter"), plan["filter"]), (("ip", "firewall", "nat"), plan["nat"])):
             p = conn.path(*path)
             items = routeros.rows(p)
-            old = [i[".id"] for i in items if _mine(i)]
+            mine = [i for i in items if _mine(i)]
+            if len(mine) == len(rules) and all(_same(i, r) for i, r in zip(mine, rules)):
+                continue                       # unchanged: leave the rules in place
+            old = [i[".id"] for i in mine]
             if old:
                 p.remove(*old)
                 n_del += len(old)
@@ -260,13 +283,20 @@ def apply(db, nas, remove_only=False):
                 n_add += 1
         hb = conn.path("ip", "hotspot", "ip-binding")
         try:
-            old = [i[".id"] for i in routeros.rows(hb) if _mine(i)]
-            if old:
-                hb.remove(*old)
-                n_del += len(old)
-            for b in plan["bindings"]:
-                hb.add(**b)
-                n_add += 1
+            # only the bindings that changed: removing a bypass binding cuts the device's connections (VoIP calls)
+            want = {_bkey(b): b for b in plan["bindings"]}
+            have = {}
+            for i in routeros.rows(hb):
+                if _mine(i):
+                    have.setdefault(_bkey(i), []).append(i[".id"])
+            stale = [x for k, ids in have.items() for x in (ids if k not in want else ids[1:])]
+            if stale:
+                hb.remove(*stale)
+                n_del += len(stale)
+            for k, b in want.items():
+                if k not in have:
+                    hb.add(**b)
+                    n_add += 1
         except Exception as e:         # noqa: BLE001 - router without hotspot
             log.info("%s: hotspot ip-binding: %s", nas.name, e)
     finally:

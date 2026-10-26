@@ -2289,8 +2289,13 @@ def test_wan_check_ping_verify_access_control_and_windows_pages(env, monkeypatch
                for plan_obj in [db.query(NetObject).filter(NetObject.name == "NVR یزد").one().id])
     assert fake.store["ip/firewall/nat"][0]["to-addresses"] == "192.168.88.10"
     assert {i["address"] for i in fake.store["ip/firewall/address-list"] if i["list"] == "macc-block"} == {"instagram.com"}
-    # applying again changes nothing twice; removing leaves the router's own rule
-    access.apply(db, nas)
+    # applying again touches nothing: a re-added bypass binding would cut the phone's calls
+    ids_before = ([r[".id"] for r in fake.store["ip/firewall/filter"]],
+                  sorted(b[".id"] for b in fake.store.get("ip/hotspot/ip-binding", [])))
+    assert ids_before[1]
+    assert access.apply(db, nas).startswith("0 مورد اضافه، 0 مورد حذف")
+    assert ids_before == ([r[".id"] for r in fake.store["ip/firewall/filter"]],
+                          sorted(b[".id"] for b in fake.store.get("ip/hotspot/ip-binding", [])))
     assert len([r for r in fake.store["ip/firewall/filter"] if r.get("comment", "").startswith("macc")]) == n_rules
     access.apply(db, nas, remove_only=True)
     assert [r[".id"] for r in fake.store["ip/firewall/filter"]] == ["*A"]
