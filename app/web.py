@@ -24,7 +24,7 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (access, proxy, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, NightList, PbxServer,
@@ -41,7 +41,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="MikroTik Accounting", docs_url=None, redoc_url=None, lifespan=lifespan)
+app = FastAPI(title="TAPIK Net", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=os.path.join(config.BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(config.BASE_DIR, "templates"))
 
@@ -1722,7 +1722,9 @@ def _pbx_page(request, edit=None):
     names = {u.id: (u.full_name or u.username) for u in users}
     assigns = db.query(ExtensionAssignment).order_by(ExtensionAssignment.extension,
                                                      ExtensionAssignment.start.desc()).all()
+    ssh_result = request.session.pop("pbx_ssh", None)
     return render(request, "pbx.html", servers=db.query(PbxServer).order_by(PbxServer.name).all(), edit=edit,
+                  ssh_steps=dict(pbxssh.STEPS, tz="منطقهٔ زمانی", api="API ایزابل", all="اتصال"), ssh_result=ssh_result, ssh_step_names=pbxssh.STEPS,
                   unassigned=pbx._unassigned(legs), users=users, user_names=names, assigns=assigns,
                   pbx_names=_pbx_names(db), offices=db.query(Office).order_by(Office.name).all(),
                   calls_count={i: n for i, n in db.query(Call.pbx_id, func.count(Call.id)).group_by(Call.pbx_id)},
@@ -1899,6 +1901,49 @@ async def pbx_api_cert(request: Request, sid: int):
         return redirect(f"/pbx/{sid}/edit#api")
     request.session["pbx_cert_fp"] = [sid, fp]
     return redirect(f"/pbx/{sid}/edit#api")
+
+
+@app.post("/pbx/{sid}/ssh-setup")
+async def pbx_ssh_setup(request: Request, sid: int):
+    """Automatic Issabel setup over SSH (the password is used once and not stored)."""
+    form = await request.form()
+    db = SessionLocal()
+    s = db.get(PbxServer, sid)
+    if s is None:
+        return redirect("/pbx")
+    steps = [k for k in pbxssh.STEPS if form.get(f"step_{k}")]
+    user = str(form.get("ssh_user", "root")).strip() or "root"
+    port = _int(form.get("ssh_port"), 22) or 22
+    if not steps or not form.get("ssh_password"):
+        flash(request, "رمز SSH و دست‌کم یک بخش را انتخاب کنید", "err")
+        return redirect(f"/pbx/{sid}/edit#ssh")
+    try:
+        r = await run_in_threadpool(pbxssh.setup, db, s, user, str(form.get("ssh_password")), port, steps)
+    except pbxssh.SshError as e:
+        flash(request, str(e), "err")
+        return redirect(f"/pbx/{sid}/edit#ssh")
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        flash(request, f"تنظیم با SSH ناموفق: {e}", "err")
+        return redirect(f"/pbx/{sid}/edit#ssh")
+    db.commit()
+    bad = [x for x in r["results"] if not x[0]]
+    log_action(request, "تنظیم خودکار ایزابل با SSH", f"{s.name}: {len(r['results']) - len(bad)} موفق، {len(bad)} خطا")
+    request.session["pbx_ssh"] = [[bool(a), b, c[:300]] for a, b, c in r["results"]][:30]
+    flash(request, "تنظیم ایزابل انجام شد" if not bad else f"تنظیم انجام شد با {len(bad)} خطا؛ جدول پایین را ببینید",
+          "ok" if not bad else "err")
+    return redirect(f"/pbx/{sid}/edit#ssh")
+
+
+@app.post("/pbx/{sid}/ssh-forget")
+def pbx_ssh_forget(request: Request, sid: int):
+    db = SessionLocal()
+    s = db.get(PbxServer, sid)
+    if s:
+        s.ssh_hostkey = ""
+        db.commit()
+        log_action(request, "پاک کردن کلید SSH ایزابل", s.name)
+    return redirect(f"/pbx/{sid}/edit#ssh")
 
 
 @app.post("/pbx/{sid}/test")

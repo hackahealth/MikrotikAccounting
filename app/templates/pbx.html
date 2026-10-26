@@ -55,6 +55,23 @@
 <p>اثر انگشت گواهی سرور: <b class="ltr">{{ cert_fp[1] }}</b></p><button class="btn p">با ایزابل یکی است؛ ثبت کن</button></form>
 {% else %}<form method="post" action="/pbx/{{ edit.id }}/api-cert"><button class="btn">{{ 'دریافت دوبارهٔ گواهی' if cert_now else 'دریافت گواهی' }}</button></form>{% endif %}
 </div>{% endif %}
+{% if edit.id %}
+<div class="card" id="ssh"><h4>تنظیم خودکار ایزابل با SSH</h4>
+<p class="hint">رمز SSH فقط برای همین یک بار استفاده و ذخیره نمی‌شود. سامانه خودش کاربر فقط‌خواندنی MySQL و کاربر AMI را با رمز تصادفی می‌سازد، اگر لازم باشد MySQL را برای شبکه باز می‌کند، فایروال ایزابل را فقط برای IP همین سرور باز می‌کند، گواهی وب را برای API ثبت می‌کند و همه را تست می‌کند. از فایل‌هایی که عوض می‌شوند نسخهٔ <span class="ltr">.macc-bak</span> نگه داشته می‌شود. کاربر و رمز ادمین وب ایزابل (برای API) را باید خودتان در فرم بالا وارد کنید.</p>
+<form method="post" action="/pbx/{{ edit.id }}/ssh-setup">
+<div class="grid g3">
+  <div class="fg"><label>کاربر SSH</label><input name="ssh_user" class="ltr" value="root"></div>
+  <div class="fg"><label>رمز SSH</label><input name="ssh_password" type="password" class="ltr" autocomplete="new-password" required></div>
+  <div class="fg"><label>پورت SSH</label><input name="ssh_port" class="ltr" value="22"></div>
+</div>
+{% for k, v in ssh_step_names.items() %}<label style="display:block"><input type="checkbox" name="step_{{ k }}" value="1" checked> {{ v }}</label>{% endfor %}
+<div style="margin-top:8px"><button class="btn p" onclick="this.textContent='در حال اجرا…'">اجرای تنظیم</button></div>
+</form>
+{% if edit.ssh_hostkey %}<p class="hint">کلید SSH ثبت‌شدهٔ ایزابل: <span class="ltr">{{ edit.ssh_hostkey }}</span>
+<form class="inline" method="post" action="/pbx/{{ edit.id }}/ssh-forget" onsubmit="return confirm('کلید ثبت‌شده پاک شود؟ (فقط اگر ایزابل را دوباره نصب کرده‌اید)')"><button class="btn s">پاک کردن کلید</button></form></p>{% endif %}
+{% if ssh_result %}<table><tr><th>بخش</th><th>نتیجه</th><th>شرح</th></tr>{% for ok, step, text in ssh_result %}<tr><td>{{ ssh_steps.get(step, step) }}</td><td>{% if ok %}<span class="badge ok">انجام شد</span>{% else %}<span class="badge err">خطا</span>{% endif %}</td><td class="wrap">{{ text }}</td></tr>{% endfor %}</table>{% endif %}
+</div>
+{% endif %}
 <h4>آماده‌سازی روی ایزابل (یک بار، با SSH به ایزابل)</h4>
 <p class="hint">۱) کاربر فقط‌خواندنی بسازید (رمز root دیتابیس در <span class="ltr">/etc/issabel.conf</span> با نام mysqlrootpwd است؛ <span class="ltr">APP_IP</span> = IP همین سرور برنامه):</p>
 <div class="code ltr">mysql -u root -p -e "CREATE USER 'acct_reader'@'APP_IP' IDENTIFIED BY 'StrongPass'; GRANT SELECT ON asteriskcdrdb.* TO 'acct_reader'@'APP_IP'; FLUSH PRIVILEGES;"</div>

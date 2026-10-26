@@ -2,54 +2,71 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}اکانتینگ میکروتیک{% endblock %}</title>
+<title>{% block title %}TAPIK Net — سامانه مدیریت خدمات شبکه{% endblock %}</title>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/chart.umd.js"></script>
 </head>
 <body>
 <div class="layout">
 <nav class="side">
-  <h1>اکانتینگ میکروتیک</h1>
+  <div class="brand"><b>TAPIK Net</b><span>سامانه مدیریت خدمات شبکه</span></div>
   {% set p = request.url.path %}
+  {% macro grp(key, title, body) %}{% if body|trim %}<details class="nav-g" data-g="{{ key }}"{{ ' open' if 'class="on"' in body }}><summary>{{ title }}</summary>{{ body }}</details>{% endif %}{% endmacro %}
   {% if 'dashboard' in perms %}<a href="/" data-tour="dashboard" class="{{ 'on' if p == '/' }}">داشبورد</a>{% endif %}
+  {% set b %}
   {% if 'mgmt_reports' in perms %}<a href="/mgmt" data-tour="mgmt" class="{{ 'on' if p.startswith('/mgmt') }}">گزارش مدیریتی</a>{% endif %}
-  {% if 'attendance' in perms %}<a href="/attendance" data-tour="attendance" class="{{ 'on' if p.startswith('/attendance') }}">ساعات اتصال کارکنان</a>{% endif %}
-  {% if 'calls_view' in perms %}<a href="/calls" data-tour="calls" class="{{ 'on' if p.startswith('/calls') }}">تماس‌ها</a>{% endif %}
   {% if 'reports_view' in perms %}<a href="/reports" data-tour="reports" class="{{ 'on' if p.startswith('/reports') }}">گزارش‌های مصرف</a>{% endif %}
   {% if 'mgmt_reports' in perms or 'router_traffic' in perms %}<a href="/offices" class="{{ 'on' if p.startswith('/offices') }}">گزارش دفاتر</a>{% endif %}
+  {% if 'attendance' in perms %}<a href="/attendance" data-tour="attendance" class="{{ 'on' if p.startswith('/attendance') }}">ساعات اتصال کارکنان</a>{% endif %}
   {% if 'router_traffic' in perms %}<a href="/traffic" data-tour="traffic" class="{{ 'on' if p.startswith('/traffic') }}">ترافیک روترها</a>{% endif %}
+  {% endset %}{{ grp('rep', 'گزارش‌ها', b) }}
+  {% set b %}
   {% if 'live_view' in perms %}<a href="/live" data-tour="live" class="{{ 'on' if p.startswith('/live') }}">کاربران آنلاین</a>{% endif %}
   {% if 'users_view' in perms %}<a href="/users" data-tour="users" class="{{ 'on' if p.startswith('/users') }}">{{ 'کارکنان' if scope_label else 'کاربران' }}</a>
   {% if not scope_label %}<a href="/groups" data-tour="groups" class="{{ 'on' if p.startswith('/groups') }}">گروه‌ها</a>{% endif %}{% endif %}
-  {% if 'devices_view' in perms %}<a href="/devices" data-tour="devices" class="{{ 'on' if p.startswith('/devices') and not p.startswith('/devices/night') }}">دستگاه‌ها</a>
-  <a href="/devices/night" class="{{ 'on' if p.startswith('/devices/night') }}">سیستم‌های روشن شبانه</a>{% endif %}
-  {% if 'logs_view' in perms %}<a href="/logs" data-tour="logs" class="{{ 'on' if p.startswith('/logs') }}">لاگ ورود</a>{% endif %}
-  {% if 'alerts_view' in perms %}<a href="/alerts" class="{{ 'on' if p.startswith('/alerts') }}">هشدارها{% if alert_count %} <span class="badge err">{{ alert_count }}</span>{% endif %}</a>{% endif %}
-  {% if 'net_monitor' in perms %}<a href="/monitor" class="{{ 'on' if p.startswith('/monitor') }}">پایش روترها و تانل‌ها</a>{% endif %}
-  {% if 'security_manage' in perms %}<a href="/security" class="{{ 'on' if p.startswith('/security') }}">ورود ناموفق و قفل</a>{% endif %}
   {% if 'grants_manage' in perms %}<a href="/grants" class="{{ 'on' if p.startswith('/grants') }}">مجوزهای موقت</a>{% endif %}
-  {% if 'org_manage' in perms %}<a href="/org" data-tour="org" class="{{ 'on' if p.startswith('/org') }}">دفترها و واحدها</a>{% endif %}
-  {% if 'mt_local' in perms %}<a href="/mt-local" data-tour="mt_local" class="{{ 'on' if p.startswith('/mt-local') }}">اکانت‌های محلی میکروتیک</a>{% endif %}
-  {% if 'hotspot_deploy' in perms %}<a href="/hotspot" data-tour="hotspot" class="{{ 'on' if p.startswith('/hotspot') }}">فولدر hotspot روترها</a>{% endif %}
+  {% if 'access_manage' in perms %}<a href="/access" class="{{ 'on' if p.startswith('/access') }}">کنترل دسترسی و سایت‌ها</a>
+  <a href="/proxy" class="{{ 'on' if p.startswith('/proxy') }}">پروکسی سرورهای RDP</a>{% endif %}
+  {% endset %}{{ grp('net', 'کاربران و اینترنت', b) }}
+  {% set b %}
+  {% if 'calls_view' in perms %}<a href="/calls" data-tour="calls" class="{{ 'on' if p.startswith('/calls') }}">تماس‌ها</a>{% endif %}
   {% if 'pbx_manage' in perms %}<a href="/pbx" data-tour="pbx" class="{{ 'on' if p.startswith('/pbx') }}">سرورهای ایزابل</a>{% endif %}
-  {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>
-  <a href="/netobjects" class="{{ 'on' if p.startswith('/netobjects') }}">سرورها و دستگاه‌های شبکه</a>{% endif %}
+  {% if 'pbx_admin' in perms %}<a href="/isx" class="{{ 'on' if p == '/isx' or p.startswith('/isx/') }}">مدیریت ایزابل</a>{% endif %}
+  {% endset %}{{ grp('tel', 'تلفن (ایزابل)', b) }}
+  {% set b %}
+  {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') and not p.startswith('/adm/') and p != '/adm' }}">اتصال و همگام‌سازی AD</a>{% endif %}
+  {% if 'ad_admin' in perms %}<a href="/adm" class="{{ 'on' if p == '/adm' or p.startswith('/adm/') }}">مدیریت Active Directory</a>{% endif %}
   {% if 'devices_view' in perms %}<a href="/winlogons" class="{{ 'on' if p.startswith('/winlogons') }}">ورود کاربران ویندوز</a>{% endif %}
   {% if 'ad_message' in perms %}<a href="/messages" class="{{ 'on' if p.startswith('/messages') }}">پیام به رایانه‌ها</a>{% endif %}
-  {% if 'access_manage' in perms %}<a href="/access" class="{{ 'on' if p.startswith('/access') }}">کنترل دسترسی و سایت‌ها</a>{% endif %}
-  {% if 'access_manage' in perms %}<a href="/proxy" class="{{ 'on' if p.startswith('/proxy') }}">پروکسی سرورهای RDP</a>{% endif %}
+  {% endset %}{{ grp('ad', 'Active Directory و ویندوز', b) }}
+  {% set b %}
+  {% if 'devices_view' in perms %}<a href="/devices" data-tour="devices" class="{{ 'on' if p.startswith('/devices') and not p.startswith('/devices/night') }}">دستگاه‌ها</a>
+  <a href="/devices/night" class="{{ 'on' if p.startswith('/devices/night') }}">سیستم‌های روشن شبانه</a>{% endif %}
+  {% if 'nas_manage' in perms %}<a href="/netobjects" class="{{ 'on' if p.startswith('/netobjects') }}">سرورها و دستگاه‌های شبکه</a>{% endif %}
+  {% endset %}{{ grp('dev', 'دستگاه‌ها', b) }}
+  {% set b %}
+  {% if 'nas_manage' in perms %}<a href="/nas" data-tour="nas" class="{{ 'on' if p.startswith('/nas') }}">روترها</a>{% endif %}
+  {% if 'net_monitor' in perms %}<a href="/monitor" class="{{ 'on' if p.startswith('/monitor') }}">پایش روترها و تانل‌ها</a>{% endif %}
+  {% if 'mt_local' in perms %}<a href="/mt-local" data-tour="mt_local" class="{{ 'on' if p.startswith('/mt-local') }}">اکانت‌های محلی میکروتیک</a>{% endif %}
+  {% if 'hotspot_deploy' in perms %}<a href="/hotspot" data-tour="hotspot" class="{{ 'on' if p.startswith('/hotspot') }}">فولدر hotspot روترها</a>{% endif %}
   {% if 'router_admin' in perms %}<a href="/routeros" class="{{ 'on' if p.startswith('/routeros') }}">نسخه و بروزرسانی روترها</a>{% endif %}
-  {% if 'ad_sync' in perms or 'ad_manage' in perms %}<a href="/ad" data-tour="ad" class="{{ 'on' if p.startswith('/ad') and not p.startswith('/admins') and not p.startswith('/adm/') and p != '/adm' }}">Active Directory</a>{% endif %}
-  {% if 'ad_admin' in perms %}<a href="/adm" class="{{ 'on' if p == '/adm' or p.startswith('/adm/') }}">مدیریت Active Directory</a>{% endif %}
-  {% if 'pbx_admin' in perms %}<a href="/isx" class="{{ 'on' if p == '/isx' or p.startswith('/isx/') }}">مدیریت ایزابل</a>{% endif %}
+  {% endset %}{{ grp('mt', 'روترهای میکروتیک', b) }}
+  {% set b %}
+  {% if 'alerts_view' in perms %}<a href="/alerts" class="{{ 'on' if p.startswith('/alerts') }}">هشدارها{% if alert_count %} <span class="badge err">{{ alert_count }}</span>{% endif %}</a>{% endif %}
+  {% if 'security_manage' in perms %}<a href="/security" class="{{ 'on' if p.startswith('/security') }}">ورود ناموفق و قفل</a>{% endif %}
+  {% if 'logs_view' in perms %}<a href="/logs" data-tour="logs" class="{{ 'on' if p.startswith('/logs') }}">لاگ ورود به اینترنت</a>{% endif %}
+  {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}
+  {% endset %}{{ grp('sec', 'امنیت و لاگ‌ها' ~ (' (' ~ alert_count ~ ')' if alert_count else ''), b) }}
+  {% set b %}
+  {% if 'org_manage' in perms %}<a href="/org" data-tour="org" class="{{ 'on' if p.startswith('/org') }}">دفترها و واحدها</a>{% endif %}
   {% if 'panel_users' in perms %}<a href="/admins" data-tour="admins" class="{{ 'on' if p.startswith('/admins') }}">کاربران پنل</a>{% endif %}
   {% if 'data_manage' in perms %}<a href="/data" class="{{ 'on' if p.startswith('/data') }}">نگهداری سابقه</a>{% endif %}
-  {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}
+  {% endset %}{{ grp('sys', 'تنظیمات سامانه', b) }}
   {% if me %}<div class="me"><a href="/account" data-tour="account" class="{{ 'on' if p.startswith('/account') }}">{{ me.full_name or me.username }}<span>{{ ROLES[me.role][0] }}</span></a>
   {% if me.user_id %}<a href="/my" data-tour="my">مصرف اینترنت من</a>{% endif %}
   {% if tour %}<a href="#" data-tour="help" class="tour-link" onclick="Tour.start();return false">راهنمای برنامه</a>{% endif %}
   <a href="/logout">خروج</a></div>{% endif %}
-  <div class="hint ltr" style="padding:6px 12px">v{{ VERSION }}</div>
+  <div class="credit"><span class="ltr">TAPIK Net v{{ VERSION }}</span>طراح و برنامه‌نویس: یعقوب طیبی</div>
 </nav>
 <main class="main">
 {% if scope_label %}<div class="scope-bar">فقط مشاهده — محدوده دسترسی شما: {{ scope_label }}</div>{% endif %}
@@ -58,6 +75,10 @@
 </main>
 </div>
 <script>
+(function(){var k='navOpen',st={};try{st=JSON.parse(localStorage.getItem(k)||'{}')}catch(e){}
+document.querySelectorAll('details.nav-g').forEach(function(d){var g=d.dataset.g;
+if(st[g]!==undefined&&!d.querySelector('a.on'))d.open=st[g];
+d.addEventListener('toggle',function(){st[g]=d.open;try{localStorage.setItem(k,JSON.stringify(st))}catch(e){}});});})();
 Chart.defaults.font.family = 'Vazirmatn, Tahoma, sans-serif';
 Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--muted');
 const PALETTE = ['#2563eb','#16a34a','#ea580c','#9333ea','#0891b2','#dc2626','#ca8a04','#db2777','#4f46e5','#65a30d','#0d9488','#7c3aed','#be123c','#475569','#a16207','#64748b'];

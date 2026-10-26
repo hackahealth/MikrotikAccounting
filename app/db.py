@@ -337,6 +337,7 @@ class PbxServer(Base):
     api_user = Column(String(100), default="")            # Issabel web admin; empty = administration off
     api_password_enc = Column(Text, default="")
     api_cert = Column(Text, default="")                   # pinned self-signed certificate of the Issabel web server
+    ssh_hostkey = Column(String(100), default="")         # SSH host key fingerprint seen at the automatic setup
 
 
 class AdChoice(Base):

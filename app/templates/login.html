@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ورود</title><link rel="stylesheet" href="/static/style.css"></head>
+<title>ورود — TAPIK Net</title><link rel="stylesheet" href="/static/style.css"></head>
 <body><div class="login card">
-<h3>ورود</h3>
+<h2 style="margin:0">TAPIK Net</h2><div class="hint" style="margin-bottom:14px">سامانه مدیریت خدمات شبکه</div><h3>ورود</h3>
 {% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
 <form method="post" action="/login">
 <div class="fg"><label>نام کاربری (کاربران دامنه: همان نام کاربری ویندوز)</label><input name="username" class="ltr" autofocus></div>
 <div class="fg"><label>رمز عبور</label><input name="password" type="password"></div>
 <button class="btn p">ورود</button>
 </form>
-<p class="hint" style="margin-top:14px">مدیران و کاربران پنل به پنل می‌روند و بقیه کاربران اینترنت به صفحه مصرف خودشان. <a href="/my">مشاهده مصرف و تغییر رمز</a></p></div></body></html>
+<p class="hint" style="margin-top:14px">مدیران و کاربران پنل به پنل می‌روند و بقیه کاربران اینترنت به صفحه مصرف خودشان. <a href="/my">مشاهده مصرف و تغییر رمز</a></p>
+<p class="hint" style="margin-top:10px;text-align:center">طراح و برنامه‌نویس: یعقوب طیبی</p></div></body></html>

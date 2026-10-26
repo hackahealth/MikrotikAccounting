@@ -2713,6 +2713,17 @@ def test_authenticating_proxy_and_quota_messages(env, monkeypatch):
     px = proxy.Proxy()
     px.start()
     px.apply_settings()
+    for _ in range(5):                  # the free port picked above may be taken meanwhile
+        if px.status()["running"]:
+            break
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        db = SessionLocal()
+        set_setting(db, "proxy_port", str(port))
+        db.commit()
+        db.close()
+        px.apply_settings()
     assert px.status()["running"]
 
     def ask(head, body=b""):
@@ -2814,3 +2825,76 @@ def test_authenticating_proxy_and_quota_messages(env, monkeypatch):
     px.apply_settings()
     assert not px.status()["running"]
     web.shutdown()
+
+
+def test_issabel_setup_over_ssh(env, monkeypatch):
+    """One SSH login does the Issabel side: read-only MySQL user, AMI user, pinned web certificate, firewall; random
+    passwords are stored encrypted, the SSH password is not; the host key is remembered and a changed key refused."""
+    import subprocess
+
+    from app import pbxapi, pbxssh
+    from app.db import PbxServer, decrypt
+    from app.web import app
+    pem = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", os.devnull,
+                          "-days", "1", "-subj", "/CN=localhost", "-out", "/dev/stdout"], capture_output=True,
+                         text=True).stdout
+    ran = []
+
+    class FakeSession:
+        local_ip = "192.168.10.9"
+
+        def __init__(self, host, port, user, password, known_fp=""):
+            self.fp = "SHA256:abc"
+            if known_fp and known_fp != self.fp:
+                raise pbxssh.SshError("کلید SSH ایزابل عوض شده است")
+            assert password == "SshPass!"
+
+        def run(self, script):
+            ran.append(script)
+            out = ["INFO tz Asia/Tehran", "INFO pbxapi yes", "OK cdr کاربر acct_reader ساخته شد",
+                   "OK ami کاربر acct_live ساخته شد", "CERT-BEGIN", pem.strip(), "CERT-END", "OK firewall باز شد"]
+            return 0, "\n".join(out) + "\n"
+
+        def close(self):
+            pass
+    monkeypatch.setattr(pbxssh, "Session", FakeSession)
+    monkeypatch.setattr(pbxssh.pbx, "test", lambda s: (True, "اتصال برقرار است: 10 رکورد"))
+    monkeypatch.setattr(pbxssh.ami, "test", lambda s: (True, "اتصال AMI برقرار است"))
+    monkeypatch.setattr(pbxssh.pbxapi, "fetch_certificate", lambda s: (pem, pbxapi.fingerprint(pem)))
+    db = SessionLocal()
+    s = PbxServer(name="ایزابل SSH", host="10.0.0.77", ext_ranges="100-199", enabled=False)
+    db.add(s)
+    db.commit()
+    sid = s.id
+    db.close()
+    tc = TestClient(app)
+    tc.post("/login", data={"username": "admin", "password": "Secret12345"})
+    assert "تنظیم خودکار ایزابل با SSH" in tc.get(f"/pbx/{sid}/edit").text
+    r = tc.post(f"/pbx/{sid}/ssh-setup", data={"ssh_user": "root", "ssh_password": "SshPass!", "ssh_port": "22",
+                                                "step_cdr": "1", "step_ami": "1", "step_cert": "1",
+                                                "step_firewall": "1"})
+    assert "تنظیم ایزابل انجام شد" in r.text and "اتصال AMI برقرار است" in r.text
+    db = SessionLocal()
+    s = db.get(PbxServer, sid)
+    assert s.db_user == "acct_reader" and s.ami_user == "acct_live" and s.ssh_hostkey == "SHA256:abc"
+    assert s.api_cert == pem and len(decrypt(s.db_password_enc)) == 24
+    assert decrypt(s.db_password_enc) in ran[0] and decrypt(s.ami_password_enc) in ran[0]
+    assert "APP='192.168.10.9'" in ran[0] and "SshPass!" not in ran[0]
+    assert "SshPass!" not in str([getattr(s, c.name) for c in PbxServer.__table__.columns])
+    s.ssh_hostkey = "SHA256:other"
+    db.commit()
+    db.close()
+    r = tc.post(f"/pbx/{sid}/ssh-setup", data={"ssh_password": "SshPass!", "step_cdr": "1"})
+    assert "کلید SSH ایزابل عوض شده است" in r.text
+    tc.post(f"/pbx/{sid}/ssh-forget")
+    db = SessionLocal()
+    assert db.get(PbxServer, sid).ssh_hostkey == ""
+    # the script itself is valid bash and only touches what was chosen
+    sc = pbxssh.script(["ami"], "10.1.1.1", "", "pw")
+    assert subprocess.run(["bash", "-n"], input=sc, text=True).returncode == 0
+    assert "acct_live" in sc and "mysql" not in sc and "iptables" not in sc
+    res, info, cert = pbxssh.parse("INFO tz Etc/UTC\nERR cdr نشد\nOK ami شد\n")
+    assert res == [(False, "cdr", "نشد"), (True, "ami", "شد")] and info == {"tz": "Etc/UTC"} and cert == ""
+    db.delete(db.get(PbxServer, sid))
+    db.commit()
+    db.close()

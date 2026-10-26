@@ -96,3 +96,17 @@ border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 1
 .tour-pop .tf{display:flex;align-items:center;gap:6px}
 .tour-pop .tf .n{color:var(--muted);font-size:12px;margin-inline-start:auto}
 .side a.tour-link{color:#93c5fd}
+
+.side .brand{margin:0 8px 16px}
+.side .brand b{display:block;font-size:19px;color:#fff;letter-spacing:.5px}
+.side .brand span{display:block;font-size:12px;color:#8a96aa;margin-top:2px}
+.side details.nav-g{margin:2px 0}
+.side details.nav-g summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:12px;font-weight:600;color:#8a96aa;border-radius:8px;user-select:none}
+.side details.nav-g summary::-webkit-details-marker{display:none}
+.side details.nav-g summary::before{content:'◂';display:inline-block;margin-left:6px;transition:transform .15s}
+.side details.nav-g[open] summary::before{transform:rotate(-90deg)}
+.side details.nav-g summary:hover{color:#fff}
+.side details.nav-g a{padding-right:24px;font-size:13.5px}
+.side .credit{padding:10px 12px;font-size:11px;color:#8a96aa;line-height:1.8}
+.side .credit span{display:block}
+@media (max-width:900px){.side details.nav-g{display:inline-block;vertical-align:top}}

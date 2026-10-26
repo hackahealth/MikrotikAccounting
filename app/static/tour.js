@@ -7,6 +7,8 @@
     if (!sel) return null;
     var e = document.querySelector(sel);
     if (!e) return null;
+    var d = e.closest && e.closest('details');
+    if (d && !d.open) d.open = true;            // a menu item inside a closed group
     var r = e.getBoundingClientRect();
     return r.width || r.height ? e : null;
   }
