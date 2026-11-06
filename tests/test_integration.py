@@ -2952,3 +2952,25 @@ def test_call_reports_trunks_extension_service_long_and_frequent(env):
     db.delete(srv)
     db.commit()
     db.close()
+
+
+def test_ip_mode_lists(env):
+    from app import devices, jobs
+    from app.db import Nas, SessionLocal, now
+    db = SessionLocal()
+    nas = db.query(Nas).first()
+    ts = now()
+    arp = lambda m, ip: {"mac-address": m, "address": ip, "interface": "br", "complete": True, "dynamic": True}
+    snap = {"arp": [arp("DD:77:00:00:00:01", "10.9.0.5"), arp("DD:77:00:00:00:02", "10.9.0.77"),
+                    arp("DD:77:00:00:00:03", "10.9.0.8")],
+            "leases": [{"mac-address": "DD:77:00:00:00:01", "address": "10.9.0.5", "status": "bound", "last-seen": "5s"},
+                       {"mac-address": "DD:77:00:00:00:03", "address": "10.9.0.8", "status": "bound", "last-seen": "5s"}]}
+    jobs._record_devices(db, nas, snap, ts)
+    snap["arp"][2] = arp("DD:77:00:00:00:03", "10.9.0.99")        # .03 moved to a hand-set IP
+    jobs._record_devices(db, nas, snap, ts)
+    db.commit()
+    dhcp, static, changed, _ = devices.ip_lists(db)
+    assert {d.mac for d in dhcp} >= {"DD:77:00:00:00:01"}
+    assert {d.mac for d in static} >= {"DD:77:00:00:00:02", "DD:77:00:00:00:03"}
+    assert {d.mac for d in changed} == {"DD:77:00:00:00:03"}
+    db.close()

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro tbl(title, items, note, show_ips) %}
+<div class="card tbl"><h3>{{ title }} <span class="hint">{{ items|length }} دستگاه</span></h3><div class="hint">{{ note }}</div><table>
+<tr><th>#</th><th>نام</th><th>IP</th>{% if show_ips %}<th>IPهای دیده‌شده</th>{% endif %}<th>MAC</th><th>نوع</th><th>روتر</th><th>آخرین مشاهده</th></tr>
+{% for d in items %}<tr><td>{{ loop.index }}</td><td>{{ d.label or d.hostname or '' }}</td><td class="ltr">{{ d.last_ip }}</td>
+{% if show_ips %}<td class="ltr">{{ (ips.get(d.mac) or [])|sort|join('، ') }}</td>{% endif %}
+<td class="ltr"><a href="/devices/{{ d.mac }}">{{ d.mac }}</a></td><td>{{ d.device_type|devtype }}</td><td>{{ nas_names.get(d.last_nas_id, '-') }}</td><td>{{ d.last_seen|jdt }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">موردی نیست</td></tr>{% endfor %}</table></div>
+{% endmacro %}
+<div class="top"><h2>دستگاه‌ها بر اساس نوع IP</h2><a class="btn" href="/devices">دستگاه‌ها</a></div>
+<div class="card"><form class="filters" method="get"><div><label>روتر</label><select name="nas" onchange="this.form.submit()"><option value="">همه</option>
+{% for r in routers %}<option value="{{ r.id }}" {{ 'selected' if nas == r.id|string }}>{{ r.name }}</option>{% endfor %}</select></div></form>
+<div class="hint">تشخیص از روی lease های DHCP روتر در هر بار بررسی. دستگاهی که در ARP هست ولی lease ندارد، IP دستی دارد.</div></div>
+{{ tbl('IP دستی تغییرداده‌شده', changed, 'IP دستی دارد و قبلاً lease داشته یا چند IP مختلف دیده شده است.', true) }}
+{{ tbl('IP دستی (بدون lease)', static, 'در شبکه دیده می‌شود ولی lease ندارد.', false) }}
+{{ tbl('DHCP', dhcp, 'IP آنها از lease های DHCP روتر است.', false) }}
+{% endblock %}

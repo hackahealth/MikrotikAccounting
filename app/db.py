@@ -211,6 +211,8 @@ class Device(Base):
     logon_source = Column(String(20), default="")         # dc|script
     ping_ok = Column(Boolean, nullable=True)              # last ping check by the router (pingcheck)
     ping_at = Column(DateTime, nullable=True)
+    ip_mode = Column(String(8), default="")               # dhcp|static: has a DHCP lease for its IP on the router
+    ip_was_dhcp = Column(Boolean, default=False)          # once had a lease, now uses a hand-set IP
 
 
 class NightList(Base):

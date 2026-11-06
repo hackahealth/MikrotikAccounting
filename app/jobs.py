@@ -127,6 +127,11 @@ def _record_devices(db, nas, snap, ts):
             if lease.get("last-seen") not in (None, "", "never") else False
         if m and bound and (m in seen or recent):
             put(m, lease.get("active-address") or lease.get("address"), "", "dhcp", lease.get("host-name"), strong=recent)
+    lease_ips = {}
+    for lease in snap.get("leases", []):
+        lm = devices.normalize_mac(lease.get("mac-address", ""))
+        if lm:
+            lease_ips.setdefault(lm, set()).update(str(x) for x in (lease.get("address"), lease.get("active-address")) if x)
     n = 0
     for m, e in seen.items():
         if e["strong"]:
@@ -140,6 +145,10 @@ def _record_devices(db, nas, snap, ts):
             devices.record(db, m, user=user, nas_id=nas.id, source=src, ts=ts)
         if not e["ips"] and not e["users"]:
             devices.record(db, m, nas_id=nas.id, ts=ts, hostname=e["host"])
+        if lease_ips:       # a router without any lease says nothing about DHCP
+            lan = [ip for ip, src in e["ips"].items() if src in ("arp", "host")]
+            if lan:
+                devices.set_ip_mode(db, m, "dhcp" if any(ip in lease_ips.get(m, ()) for ip in lan) else "static")
     return n
 
 

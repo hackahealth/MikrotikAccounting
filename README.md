@@ -429,3 +429,6 @@ windows/              نصب‌کننده ویندوز (install / update / manag
 scripts/build_windows.sh  ساخت بسته ویندوز همراه Python
 tests/                تست‌ها:  python -m pytest tests
 ```
+
+## DHCP / IP دستی (v1.23.0)
+صفحهٔ «دستگاه‌ها ← DHCP / IP دستی» (`/devices/ipmode`): دستگاه‌ها از روی lease های DHCP روتر (`/ip dhcp-server lease`) و ARP به سه فهرست تقسیم می‌شوند: DHCP، IP دستی (بدون lease)، و IP دستیِ تغییرداده‌شده (قبلاً lease داشته یا چند IP دیده شده).

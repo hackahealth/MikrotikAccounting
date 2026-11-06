@@ -2188,6 +2188,14 @@ def devices_page(request: Request, q: str = "", status: str = "", nas: str = "",
                   night_time="%02d:%02d" % nightlist.check_time(db))
 
 
+@app.get("/devices/ipmode", response_class=HTMLResponse)
+def ipmode_page(request: Request, nas: str = ""):
+    db = SessionLocal()
+    dhcp, static, changed, ips = devices.ip_lists(db, int(nas) if nas.isdigit() else None)
+    return render(request, "ipmode.html", dhcp=dhcp, static=static, changed=changed, ips=ips, nas=nas,
+                  routers=db.query(Nas).order_by(Nas.name).all(), nas_names=_nas_names(db))
+
+
 # ------------------------------------------------------------------ nightly list of devices that are on
 def _night_ctx(request):
     db = SessionLocal()
