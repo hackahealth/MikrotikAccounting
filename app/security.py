@@ -31,7 +31,10 @@ def rules(db):
         except ValueError:
             return default
     return {"count": num("lock_fail_count", 10), "hours": num("lock_fail_hours", 24) or 24,
-            "minutes": num("lock_minutes", 0), "lock_source": get_setting(db, "lock_source", "1") == "1"}
+            "minutes": num("lock_minutes", 0), "lock_source": get_setting(db, "lock_source", "1") == "1",
+            "any_count": num("lock_any_count", 0), "rate_count": num("lock_rate_count", 30),
+            "rate_minutes": num("lock_rate_minutes", 1) or 1,
+            "ip_change": get_setting(db, "lock_ip_change", "1") == "1"}
 
 
 def active_locks(db):
@@ -78,11 +81,47 @@ def is_bad_password(reason):
     return any(x in (reason or "") for x in BAD_PASSWORD)
 
 
+def check_rate(db, source):
+    """Too many requests to the server from one source in a short time: lock the source."""
+    r = rules(db)
+    kind, value = source_kind(source)
+    if not (kind and r["rate_count"] and r["lock_source"]):
+        return None
+    since = now() - timedelta(minutes=r["rate_minutes"])
+    n = db.query(AuthLog).filter(AuthLog.mac == source[:64], AuthLog.ts >= since).count()
+    if n < r["rate_count"]:
+        return None
+    lk, new = lock(db, kind, value, f"{n} درخواست در {r['rate_minutes']} دقیقه (درخواست بیش از حد)", "سیستم", True,
+                   r["minutes"])
+    if new:
+        alerts.add(db, "lock", f"قفل خودکار {KINDS[lk.kind]} {lk.value}", lk.reason, "err", "/security")
+    return lk if new else None
+
+
+def on_ip_change(db, mac, old_ip, new_ip):
+    """A device left DHCP for a hand-set IP: lock its MAC (can be turned off in the rules)."""
+    if not rules(db)["ip_change"]:
+        return None
+    lk, new = lock(db, "mac", mac, f"تغییر دستی IP (قبلاً DHCP، اکنون {new_ip})", "سیستم", True, rules(db)["minutes"])
+    if new:
+        alerts.add(db, "lock", f"قفل خودکار MAC {mac}", lk.reason, "err", "/security")
+    return lk if new else None
+
+
 def on_failure(db, username, source, reason):
     """After a rejected login: lock the user / the source when the failed-login rule is reached."""
+    r = rules(db)
+    kind0, value0 = source_kind(source)
+    if r["any_count"] and kind0 and r["lock_source"]:      # unauthorized logins: any rejection counts
+        since = now() - timedelta(hours=r["hours"])
+        n = db.query(AuthLog).filter(AuthLog.result == "reject", AuthLog.mac == source[:64], AuthLog.ts >= since,
+                                     ~AuthLog.reason.like("قفل شده%")).count()
+        if n >= r["any_count"]:
+            lk, new = lock(db, kind0, value0, f"{n} ورود غیرمجاز در {r['hours']} ساعت", "سیستم", True, r["minutes"])
+            if new:
+                alerts.add(db, "lock", f"قفل خودکار {KINDS[lk.kind]} {lk.value}", lk.reason, "err", "/security")
     if not is_bad_password(reason):
         return []
-    r = rules(db)
     if not r["count"]:
         return []
     since = now() - timedelta(hours=r["hours"])

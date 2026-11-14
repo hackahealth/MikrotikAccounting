@@ -3200,7 +3200,9 @@ async def security_unlock(request: Request, lock_id: int):
 async def security_rules(request: Request):
     form = await request.form()
     db = SessionLocal()
-    for key in ("lock_fail_count", "lock_fail_hours", "lock_minutes"):
+    set_setting(db, "lock_ip_change", "1" if form.get("lock_ip_change") else "0")
+    for key in ("lock_fail_count", "lock_fail_hours", "lock_minutes", "lock_any_count", "lock_rate_count",
+                "lock_rate_minutes"):
         v = _int(str(form.get(key, "")).translate(FA_TO_EN))
         if v is not None and v >= 0:
             set_setting(db, key, str(v))

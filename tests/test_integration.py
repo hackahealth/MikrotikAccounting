@@ -2974,3 +2974,39 @@ def test_ip_mode_lists(env):
     assert {d.mac for d in static} >= {"DD:77:00:00:00:02", "DD:77:00:00:00:03"}
     assert {d.mac for d in changed} == {"DD:77:00:00:00:03"}
     db.close()
+
+
+def test_auto_lock_ip_change_rate_and_unauthorized(env):
+    from datetime import timedelta
+    from app import devices, security
+    from app.db import AuthLog, SessionLocal, now, set_setting
+    db = SessionLocal()
+    assert devices.set_ip_mode(db, "EE:77:00:00:00:01", "dhcp") is None      # unknown device
+    mac = "EE:77:00:00:00:02"
+    db.add(devices.Device(mac=mac, ip_mode="dhcp"))
+    db.commit()
+    assert devices.set_ip_mode(db, mac, "static") is True
+    assert security.on_ip_change(db, mac, "", "10.0.0.9") is not None
+    db.commit()
+    assert security.locked(db, "", mac)
+    set_setting(db, "lock_ip_change", "0")
+    assert security.on_ip_change(db, "EE:77:00:00:00:03", "", "10.0.0.9") is None
+    # rate
+    src = "EE:77:00:00:00:04"
+    set_setting(db, "lock_rate_count", "5")
+    for _ in range(5):
+        db.add(AuthLog(username="x", nas_ip="1.1.1.1", mac=src, service="hotspot", method="pap", result="reject",
+                       reason="x", ts=now()))
+    db.commit()
+    assert security.check_rate(db, src) is not None
+    # unauthorized
+    src2 = "EE:77:00:00:00:05"
+    set_setting(db, "lock_any_count", "2")
+    for _ in range(2):
+        db.add(AuthLog(username="x", nas_ip="1.1.1.1", mac=src2, service="hotspot", method="pap", result="reject",
+                       reason="خارج از ساعت مجاز", ts=now()))
+    db.commit()
+    security.on_failure(db, "x", src2, "خارج از ساعت مجاز")
+    db.commit()
+    assert security.locked(db, "", src2)
+    db.close()

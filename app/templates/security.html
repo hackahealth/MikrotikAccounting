@@ -57,6 +57,12 @@
 <div class="fg"><label>در بازهٔ (ساعت)</label><input name="lock_fail_hours" class="ltr" value="{{ rules.hours }}"></div>
 <div class="fg"><label>مدت قفل (دقیقه؛ ۰ = تا باز کردن دستی)</label><input name="lock_minutes" class="ltr" value="{{ rules.minutes }}"></div>
 </div>
+<div class="grid g3">
+<div class="fg"><label>هر ورود ردشده (غیرمجاز) از یک مبدأ؛ تعداد (۰ = خاموش)</label><input name="lock_any_count" class="ltr" value="{{ rules.any_count }}"></div>
+<div class="fg"><label>درخواست بیش از حد به سرور؛ تعداد (۰ = خاموش)</label><input name="lock_rate_count" class="ltr" value="{{ rules.rate_count }}"></div>
+<div class="fg"><label>در بازهٔ (دقیقه)</label><input name="lock_rate_minutes" class="ltr" value="{{ rules.rate_minutes }}"></div>
+</div>
+<label><input type="checkbox" name="lock_ip_change" value="1" {{ 'checked' if rules.ip_change }}> دستگاهی که IP خود را دستی از DHCP تغییر داد (MAC) قفل شود</label><br>
 <label><input type="checkbox" name="lock_source" value="1" {{ 'checked' if rules.lock_source }}> مبدأ (MAC هات‌اسپات / IP کلاینت VPN) هم با همین قانون قفل شود</label>
 <p class="hint">با هر قفل خودکار، هشدار برای مدیر سیستم و کارشناس IT در صفحهٔ «هشدارها» ثبت می‌شود.</p>
 <button class="btn p">ذخیره</button></form></div>

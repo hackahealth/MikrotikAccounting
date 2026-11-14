@@ -258,6 +258,10 @@ class RadiusServer:
         try:
             user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
             lk = security.locked(db, username, _attr(req, "Calling-Station-Id", "") or "")
+            if not lk:
+                security.check_rate(db, mac)
+                db.commit()
+                lk = security.locked(db, username, _attr(req, "Calling-Station-Id", "") or "")
             if lk:
                 return self._done(db, False, f"قفل شده ({security.KINDS[lk.kind]} {lk.value}): {lk.reason}"[:200], {},
                                   username, nas_ip, mac, service, "locked")

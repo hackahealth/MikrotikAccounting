@@ -250,9 +250,11 @@ def set_ip_mode(db, mac, mode):
     d = db.query(Device).filter_by(mac=mac).first()
     if d is None:
         return
+    moved = mode == "static" and d.ip_mode == "dhcp"
     if mode == "dhcp":
         d.ip_was_dhcp = True
     d.ip_mode = mode
+    return moved
 
 
 def ip_lists(db, nas_id=None):
