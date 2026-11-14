@@ -148,8 +148,9 @@ def _record_devices(db, nas, snap, ts):
         if lease_ips:       # a router without any lease says nothing about DHCP
             lan = [ip for ip, src in e["ips"].items() if src in ("arp", "host")]
             if lan:
-                if devices.set_ip_mode(db, m, "dhcp" if any(ip in lease_ips.get(m, ()) for ip in lan) else "static"):
-                    security.on_ip_change(db, m, "", lan[0])
+                leased = lease_ips.get(m, set())
+                if devices.set_ip_mode(db, m, "dhcp" if any(ip in leased for ip in lan) else "static"):
+                    security.on_ip_change(db, m, "، ".join(sorted(leased)), "، ".join(sorted(lan)))
     return n
 
 

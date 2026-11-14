@@ -71,10 +71,20 @@ def lock(db, kind, value, reason, by="", auto=False, minutes=0):
     return lk, True
 
 
-def unlock(db, lock_id, by):
+def unlock(db, lock_id, by, note=""):
     lk = db.get(Lock, lock_id)
     if lk and lk.released_at is None:
         lk.released_at, lk.released_by = now(), by
+        if note:
+            lk.note = note[:4000]
+    return lk
+
+
+def set_note(db, lock_id, note):
+    """Incident description kept with the lock (also after it was released)."""
+    lk = db.get(Lock, lock_id)
+    if lk:
+        lk.note = (note or "")[:4000]
     return lk
 
 
@@ -103,7 +113,8 @@ def on_ip_change(db, mac, old_ip, new_ip):
     """A device left DHCP for a hand-set IP: lock its MAC (can be turned off in the rules)."""
     if not rules(db)["ip_change"]:
         return None
-    lk, new = lock(db, "mac", mac, f"تغییر دستی IP (قبلاً DHCP، اکنون {new_ip})", "سیستم", True, rules(db)["minutes"])
+    was = f"قبلاً DHCP {old_ip}" if old_ip else "قبلاً DHCP"
+    lk, new = lock(db, "mac", mac, f"تغییر دستی IP ({was}، اکنون {new_ip})", "سیستم", True, rules(db)["minutes"])
     if new:
         alerts.add(db, "lock", f"قفل خودکار MAC {mac}", lk.reason, "err", "/security")
     return lk if new else None

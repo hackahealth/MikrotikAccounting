@@ -91,7 +91,7 @@ ROUTES = [
     ("GET", r"/mgmt", "mgmt_reports"), ("GET", r"/mgmt/export\.xlsx", "mgmt_reports"),
     ("GET", r"/mgmt/print", "mgmt_reports"), ("POST", r"/settings", "settings"),
     ("GET", r"/attendance", "attendance"), ("GET", r"/attendance/export\.xlsx", "attendance"),
-    ("GET", r"/devices", "devices_view"), ("POST", r"/devices/\d+/type", "devices_edit"),
+    ("GET", r"/devices", "devices_view"), ("GET", r"/devices/ipmode", "devices_view"), ("POST", r"/devices/\d+/type", "devices_edit"),
     ("GET", r"/devices/[0-9A-Fa-f:.\-]{12,17}", "devices_view"), ("POST", r"/devices/settings", "devices_edit"),
     ("GET", r"/devices/night(\.xlsx)?", "devices_view"), ("POST", r"/devices/night/take", "devices_edit"),
     ("POST", r"/devices/bulk-type", "devices_edit"), ("POST", r"/devices/logon-settings", "devices_edit"),

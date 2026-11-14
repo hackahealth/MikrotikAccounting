@@ -517,6 +517,7 @@ class Lock(Base):
     until = Column(DateTime, nullable=True)               # None = until unlocked by hand
     released_at = Column(DateTime, nullable=True)
     released_by = Column(String(100), default="")
+    note = Column(Text, default="")                       # incident description / what was done (by the admin)
 
 
 class TempGrant(Base):

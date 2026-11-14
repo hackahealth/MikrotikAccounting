@@ -3188,12 +3188,27 @@ async def security_lock(request: Request):
 async def security_unlock(request: Request, lock_id: int):
     form = await request.form()
     db = SessionLocal()
-    lk = security.unlock(db, lock_id, request.state.me.username)
+    note = str(form.get("note", "")).strip()
+    lk = security.unlock(db, lock_id, request.state.me.username, note)
     db.commit()
     if lk:
-        log_action(request, "باز کردن قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value}")
+        log_action(request, "باز کردن قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value}" +
+                   (f" — {note[:300]}" if note else ""))
         flash(request, f"قفل {lk.value} باز شد")
     return redirect(_local(form.get("back"), "/security"))
+
+
+@app.post("/security/{lock_id}/note")
+async def security_note(request: Request, lock_id: int):
+    form = await request.form()
+    db = SessionLocal()
+    note = str(form.get("note", "")).strip()
+    lk = security.set_note(db, lock_id, note)
+    db.commit()
+    if lk:
+        log_action(request, "شرح رخداد قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value} — {note[:300]}")
+        flash(request, "شرح رخداد ذخیره شد")
+    return redirect(_local(form.get("back"), "/security") + f"#lock{lock_id}")
 
 
 @app.post("/security/rules")

@@ -1810,8 +1810,15 @@ def test_locks_grants_logon_message_quota_warning_monitor(env):
         db = SessionLocal()
         lid = db.query(Lock).filter(Lock.kind == "user", Lock.value == "lk.user").first().id
         db.close()
-        c.post(f"/security/{lid}/unlock")
+        c.post(f"/security/{lid}/unlock", data={"note": "کاربر رمز را فراموش کرده بود"})
         assert auth("lk.user", "Pw123456", "AA:BB:EE:00:00:02") == packet.AccessAccept
+        db = SessionLocal()
+        assert db.get(Lock, lid).note == "کاربر رمز را فراموش کرده بود"
+        db.close()
+        c.post(f"/security/{lid}/note", data={"note": "شرح کامل رخداد"})
+        r = c.get("/security")
+        assert "شرح کامل رخداد" in r.text
+        assert c.get("/devices/ipmode").status_code == 200
         assert auth("lk.user", "Pw123456", "AA:BB:EE:00:00:01") == packet.AccessReject   # the MAC is still locked
         c.post("/security/lock", data={"kind": "ip", "value": "10.9.9.9", "reason": "تست"})
         db = SessionLocal()
@@ -3017,11 +3024,13 @@ def test_locked_device_dropped_on_router(env):
     from app.db import Device, Nas, SessionLocal
     db = SessionLocal()
     nas = db.query(Nas).first()
+    from app.db import DeviceHistory, now
     db.add(Device(mac="EE:88:00:00:00:01", last_ip="10.8.0.1"))
+    db.add(DeviceHistory(mac="EE:88:00:00:00:01", kind="ip", value="10.8.0.3", first_seen=now(), last_seen=now()))
     security.lock(db, "mac", "EE:88:00:00:00:01", "t")
     security.lock(db, "ip", "10.8.0.2", "t")
     db.commit()
     plan = access.desired(db, nas)
-    assert {"10.8.0.1", "10.8.0.2"} <= set(plan["lists"]["macc-lock"])
+    assert {"10.8.0.1", "10.8.0.2", "10.8.0.3"} <= set(plan["lists"]["macc-lock"])   # every IP of the MAC
     assert plan["filter"][0]["src-address-list"] == "macc-lock"
     db.close()

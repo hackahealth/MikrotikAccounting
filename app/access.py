@@ -139,7 +139,7 @@ def desired(db, nas):
             if lk.kind == "ip":
                 lk_ips.add(lk.value)
             else:
-                lk_ips.update(i for (i,) in db.query(Device.last_ip).filter(Device.mac == lk.value) if i)
+                lk_ips.update(devices.current_ips(db, lk.value))
         lk_ips -= set(ips)
         if lk_ips:
             lists["macc-lock"] = sorted(lk_ips)

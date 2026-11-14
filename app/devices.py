@@ -246,6 +246,15 @@ def record(db, mac, ip="", user="", nas_id=None, source="", ts=None, hostname=No
     return d
 
 
+def current_ips(db, mac):
+    """Every IP this MAC was seen with in the last HISTORY_GAP (a device can hold several), plus its last IP."""
+    since = now() - HISTORY_GAP
+    ips = {v for (v,) in db.query(DeviceHistory.value).filter(DeviceHistory.mac == mac, DeviceHistory.kind == "ip",
+                                                              DeviceHistory.last_seen >= since)}
+    ips.update(i for (i,) in db.query(Device.last_ip).filter(Device.mac == mac) if i)
+    return {i for i in ips if i}
+
+
 def set_ip_mode(db, mac, mode):
     d = db.query(Device).filter_by(mac=mac).first()
     if d is None:

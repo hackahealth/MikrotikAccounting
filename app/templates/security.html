@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<style>.unlock-f{display:flex;gap:6px;align-items:flex-start}.unlock-f textarea{min-width:200px;font:inherit;font-size:12px}.lock-note{white-space:pre-line;font-size:13px;margin-bottom:4px}</style>
 <div class="top"><h2>ورودهای ناموفق و قفل</h2>
 <form class="filters" method="get"><div><select name="hours" onchange="this.form.submit()">{% for h, t in ((1, '۱ ساعت'), (24, '۲۴ ساعت'), (168, '۷ روز'), (720, '۳۰ روز')) %}<option value="{{ h }}" {{ 'selected' if hours == h }}>{{ t }} اخیر</option>{% endfor %}</select></div></form></div>
 
@@ -14,7 +15,7 @@
 {% for lk in locks %}
 <tr><td>{{ kinds[lk.kind] }}</td><td class="ltr">{{ lk.value }}</td><td class="wrap">{{ lk.reason }}{% if lk.auto %} <span class="badge warn">خودکار</span>{% endif %}</td>
 <td>{{ lk.created_by }}</td><td>{{ lk.created_at|jdt }}</td><td>{{ lk.until|jdt if lk.until else 'باز کردن دستی' }}</td>
-<td><form method="post" action="/security/{{ lk.id }}/unlock"><button class="btn s">باز کردن قفل</button></form></td></tr>
+<td><form method="post" action="/security/{{ lk.id }}/unlock" class="unlock-f"><textarea name="note" rows="2" placeholder="شرح رخداد / اقدام انجام‌شده (اختیاری)">{{ lk.note or '' }}</textarea><button class="btn s">باز کردن قفل</button></form></td></tr>
 {% else %}<tr><td colspan="7" class="muted">قفلی نیست</td></tr>{% endfor %}
 </table></div>
 <h4>قفل دستی</h4>
@@ -69,7 +70,8 @@
 <button class="btn p">ذخیره</button></form></div>
 
 {% if old %}<div class="card"><h3>قفل‌های باز شده (۵۰ مورد آخر)</h3><div class="tbl"><table>
-<tr><th>نوع</th><th>مقدار</th><th>علت</th><th>قفل</th><th>باز شد</th></tr>
-{% for lk in old %}<tr><td>{{ kinds[lk.kind] }}</td><td class="ltr">{{ lk.value }}</td><td class="wrap">{{ lk.reason }}</td><td>{{ lk.created_at|jdt }} {{ lk.created_by }}</td><td>{{ lk.released_at|jdt }} {{ lk.released_by }}</td></tr>{% endfor %}
+<tr><th>نوع</th><th>مقدار</th><th>علت</th><th>قفل</th><th>باز شد</th><th>شرح رخداد</th></tr>
+{% for lk in old %}<tr id="lock{{ lk.id }}"><td>{{ kinds[lk.kind] }}</td><td class="ltr">{{ lk.value }}</td><td class="wrap">{{ lk.reason }}</td><td>{{ lk.created_at|jdt }} {{ lk.created_by }}</td><td>{{ lk.released_at|jdt }} {{ lk.released_by }}</td>
+<td class="wrap" style="min-width:260px">{% if lk.note %}<div class="lock-note">{{ lk.note }}</div>{% endif %}<details><summary class="hint">{{ 'ویرایش' if lk.note else 'ثبت شرح رخداد' }}</summary><form method="post" action="/security/{{ lk.id }}/note"><textarea name="note" rows="5" style="width:100%">{{ lk.note or '' }}</textarea><button class="btn s">ذخیره</button></form></details></td></tr>{% endfor %}
 </table></div></div>{% endif %}
 {% endblock %}
