@@ -3010,3 +3010,18 @@ def test_auto_lock_ip_change_rate_and_unauthorized(env):
     db.commit()
     assert security.locked(db, "", src2)
     db.close()
+
+
+def test_locked_device_dropped_on_router(env):
+    from app import access, security
+    from app.db import Device, Nas, SessionLocal
+    db = SessionLocal()
+    nas = db.query(Nas).first()
+    db.add(Device(mac="EE:88:00:00:00:01", last_ip="10.8.0.1"))
+    security.lock(db, "mac", "EE:88:00:00:00:01", "t")
+    security.lock(db, "ip", "10.8.0.2", "t")
+    db.commit()
+    plan = access.desired(db, nas)
+    assert {"10.8.0.1", "10.8.0.2"} <= set(plan["lists"]["macc-lock"])
+    assert plan["filter"][0]["src-address-list"] == "macc-lock"
+    db.close()

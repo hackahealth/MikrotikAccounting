@@ -62,6 +62,7 @@
 <div class="fg"><label>درخواست بیش از حد به سرور؛ تعداد (۰ = خاموش)</label><input name="lock_rate_count" class="ltr" value="{{ rules.rate_count }}"></div>
 <div class="fg"><label>در بازهٔ (دقیقه)</label><input name="lock_rate_minutes" class="ltr" value="{{ rules.rate_minutes }}"></div>
 </div>
+<label><input type="checkbox" name="lock_router" value="1" {{ 'checked' if rules.router_block }}> MAC/IP قفل‌شده روی فایروال روتر هم مسدود شود (فقط روترهایی که «کنترل دسترسی» آنها روشن است)</label><br>
 <label><input type="checkbox" name="lock_ip_change" value="1" {{ 'checked' if rules.ip_change }}> دستگاهی که IP خود را دستی از DHCP تغییر داد (MAC) قفل شود</label><br>
 <label><input type="checkbox" name="lock_source" value="1" {{ 'checked' if rules.lock_source }}> مبدأ (MAC هات‌اسپات / IP کلاینت VPN) هم با همین قانون قفل شود</label>
 <p class="hint">با هر قفل خودکار، هشدار برای مدیر سیستم و کارشناس IT در صفحهٔ «هشدارها» ثبت می‌شود.</p>

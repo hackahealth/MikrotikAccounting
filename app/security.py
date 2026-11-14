@@ -34,6 +34,7 @@ def rules(db):
             "minutes": num("lock_minutes", 0), "lock_source": get_setting(db, "lock_source", "1") == "1",
             "any_count": num("lock_any_count", 0), "rate_count": num("lock_rate_count", 30),
             "rate_minutes": num("lock_rate_minutes", 1) or 1,
+            "router_block": get_setting(db, "lock_router", "1") == "1",
             "ip_change": get_setting(db, "lock_ip_change", "1") == "1"}
 
 
