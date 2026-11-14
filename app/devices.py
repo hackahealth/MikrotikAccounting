@@ -246,6 +246,44 @@ def record(db, mac, ip="", user="", nas_id=None, source="", ts=None, hostname=No
     return d
 
 
+def current_ips(db, mac):
+    """Every IP this MAC was seen with in the last HISTORY_GAP (a device can hold several), plus its last IP."""
+    since = now() - HISTORY_GAP
+    ips = {v for (v,) in db.query(DeviceHistory.value).filter(DeviceHistory.mac == mac, DeviceHistory.kind == "ip",
+                                                              DeviceHistory.last_seen >= since)}
+    ips.update(i for (i,) in db.query(Device.last_ip).filter(Device.mac == mac) if i)
+    return {i for i in ips if i}
+
+
+def set_ip_mode(db, mac, mode):
+    d = db.query(Device).filter_by(mac=mac).first()
+    if d is None:
+        return
+    moved = mode == "static" and d.ip_mode == "dhcp"
+    if mode == "dhcp":
+        d.ip_was_dhcp = True
+    d.ip_mode = mode
+    return moved
+
+
+def ip_lists(db, nas_id=None):
+    """(dhcp, static, changed): devices by how they got their IP. changed = static IP that was moved by hand
+    (it had a DHCP lease before, or showed more than one IP)."""
+    qry = db.query(Device).filter(Device.ip_mode.in_(("dhcp", "static")))
+    if nas_id:
+        qry = qry.filter(Device.last_nas_id == nas_id)
+    devs = qry.order_by(Device.last_seen.desc()).all()
+    statics = [d.mac for d in devs if d.ip_mode == "static"]
+    ips = {}
+    for mac, val in db.query(DeviceHistory.mac, DeviceHistory.value).filter(
+            DeviceHistory.kind == "ip", DeviceHistory.mac.in_(statics or [""])).distinct():
+        ips.setdefault(mac, set()).add(val)
+    dhcp = [d for d in devs if d.ip_mode == "dhcp"]
+    static = [d for d in devs if d.ip_mode == "static"]
+    changed = [d for d in static if d.ip_was_dhcp or len(ips.get(d.mac, ())) > 1]
+    return dhcp, static, changed, ips
+
+
 def stale_days(db):
     from .db import get_setting
     try:

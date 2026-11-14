@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% macro st(s) %}{% if s == 'online' %}<span class="badge ok">آنلاین</span>{% elif s == 'active' %}<span class="badge">فعال</span>{% else %}<span class="badge warn">راکد</span>{% endif %}{% endmacro %}
 {% block content %}
-<div class="top"><h2>دستگاه‌ها</h2><a class="btn" href="/devices/night">سیستم‌های روشن ساعت {{ night_time }}</a></div>
+<div class="top"><h2>دستگاه‌ها</h2><a class="btn" href="/devices/ipmode">DHCP / IP دستی</a> <a class="btn" href="/devices/night">سیستم‌های روشن ساعت {{ night_time }}</a></div>
 <div class="grid g3" style="margin-bottom:16px">
   <div class="card stat"><div class="l">کل دستگاه‌های ثبت‌شده</div><div class="v">{{ counts.all }}</div><div class="hint">سابقه هیچ دستگاهی پاک نمی‌شود</div></div>
   <div class="card stat"><div class="l">الان روی شبکه</div><div class="v">{{ counts.online }}</div><div class="hint">دیده‌شده در آخرین خواندن روترها{% if ping.last %} و پاسخ‌دهنده به پینگ (بررسی {{ ping.last|jdt }}: {{ ping.dead }} از {{ ping.checked }} پاسخ ندادند){% endif %}</div></div>

@@ -1810,8 +1810,15 @@ def test_locks_grants_logon_message_quota_warning_monitor(env):
         db = SessionLocal()
         lid = db.query(Lock).filter(Lock.kind == "user", Lock.value == "lk.user").first().id
         db.close()
-        c.post(f"/security/{lid}/unlock")
+        c.post(f"/security/{lid}/unlock", data={"note": "کاربر رمز را فراموش کرده بود"})
         assert auth("lk.user", "Pw123456", "AA:BB:EE:00:00:02") == packet.AccessAccept
+        db = SessionLocal()
+        assert db.get(Lock, lid).note == "کاربر رمز را فراموش کرده بود"
+        db.close()
+        c.post(f"/security/{lid}/note", data={"note": "شرح کامل رخداد"})
+        r = c.get("/security")
+        assert "شرح کامل رخداد" in r.text
+        assert c.get("/devices/ipmode").status_code == 200
         assert auth("lk.user", "Pw123456", "AA:BB:EE:00:00:01") == packet.AccessReject   # the MAC is still locked
         c.post("/security/lock", data={"kind": "ip", "value": "10.9.9.9", "reason": "تست"})
         db = SessionLocal()
@@ -2951,4 +2958,79 @@ def test_call_reports_trunks_extension_service_long_and_frequent(env):
     db.query(Call).filter(Call.pbx_id == srv.id).delete()
     db.delete(srv)
     db.commit()
+    db.close()
+
+
+def test_ip_mode_lists(env):
+    from app import devices, jobs
+    from app.db import Nas, SessionLocal, now
+    db = SessionLocal()
+    nas = db.query(Nas).first()
+    ts = now()
+    arp = lambda m, ip: {"mac-address": m, "address": ip, "interface": "br", "complete": True, "dynamic": True}
+    snap = {"arp": [arp("DD:77:00:00:00:01", "10.9.0.5"), arp("DD:77:00:00:00:02", "10.9.0.77"),
+                    arp("DD:77:00:00:00:03", "10.9.0.8")],
+            "leases": [{"mac-address": "DD:77:00:00:00:01", "address": "10.9.0.5", "status": "bound", "last-seen": "5s"},
+                       {"mac-address": "DD:77:00:00:00:03", "address": "10.9.0.8", "status": "bound", "last-seen": "5s"}]}
+    jobs._record_devices(db, nas, snap, ts)
+    snap["arp"][2] = arp("DD:77:00:00:00:03", "10.9.0.99")        # .03 moved to a hand-set IP
+    jobs._record_devices(db, nas, snap, ts)
+    db.commit()
+    dhcp, static, changed, _ = devices.ip_lists(db)
+    assert {d.mac for d in dhcp} >= {"DD:77:00:00:00:01"}
+    assert {d.mac for d in static} >= {"DD:77:00:00:00:02", "DD:77:00:00:00:03"}
+    assert {d.mac for d in changed} == {"DD:77:00:00:00:03"}
+    db.close()
+
+
+def test_auto_lock_ip_change_rate_and_unauthorized(env):
+    from datetime import timedelta
+    from app import devices, security
+    from app.db import AuthLog, SessionLocal, now, set_setting
+    db = SessionLocal()
+    assert devices.set_ip_mode(db, "EE:77:00:00:00:01", "dhcp") is None      # unknown device
+    mac = "EE:77:00:00:00:02"
+    db.add(devices.Device(mac=mac, ip_mode="dhcp"))
+    db.commit()
+    assert devices.set_ip_mode(db, mac, "static") is True
+    assert security.on_ip_change(db, mac, "", "10.0.0.9") is not None
+    db.commit()
+    assert security.locked(db, "", mac)
+    set_setting(db, "lock_ip_change", "0")
+    assert security.on_ip_change(db, "EE:77:00:00:00:03", "", "10.0.0.9") is None
+    # rate
+    src = "EE:77:00:00:00:04"
+    set_setting(db, "lock_rate_count", "5")
+    for _ in range(5):
+        db.add(AuthLog(username="x", nas_ip="1.1.1.1", mac=src, service="hotspot", method="pap", result="reject",
+                       reason="x", ts=now()))
+    db.commit()
+    assert security.check_rate(db, src) is not None
+    # unauthorized
+    src2 = "EE:77:00:00:00:05"
+    set_setting(db, "lock_any_count", "2")
+    for _ in range(2):
+        db.add(AuthLog(username="x", nas_ip="1.1.1.1", mac=src2, service="hotspot", method="pap", result="reject",
+                       reason="خارج از ساعت مجاز", ts=now()))
+    db.commit()
+    security.on_failure(db, "x", src2, "خارج از ساعت مجاز")
+    db.commit()
+    assert security.locked(db, "", src2)
+    db.close()
+
+
+def test_locked_device_dropped_on_router(env):
+    from app import access, security
+    from app.db import Device, Nas, SessionLocal
+    db = SessionLocal()
+    nas = db.query(Nas).first()
+    from app.db import DeviceHistory, now
+    db.add(Device(mac="EE:88:00:00:00:01", last_ip="10.8.0.1"))
+    db.add(DeviceHistory(mac="EE:88:00:00:00:01", kind="ip", value="10.8.0.3", first_seen=now(), last_seen=now()))
+    security.lock(db, "mac", "EE:88:00:00:00:01", "t")
+    security.lock(db, "ip", "10.8.0.2", "t")
+    db.commit()
+    plan = access.desired(db, nas)
+    assert {"10.8.0.1", "10.8.0.2", "10.8.0.3"} <= set(plan["lists"]["macc-lock"])   # every IP of the MAC
+    assert plan["filter"][0]["src-address-list"] == "macc-lock"
     db.close()

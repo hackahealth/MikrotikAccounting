@@ -15,7 +15,7 @@ from datetime import timedelta
 from urllib.parse import urlparse
 
 from . import alerts, devices, grants, netscope, routeros
-from .db import AccessExempt, AcctSession, Device, Nas, NetObject, SiteRule, get_setting, now
+from .db import AccessExempt, AcctSession, Device, Lock, Nas, NetObject, SiteRule, get_setting, now
 
 log = logging.getLogger("access")
 TAG = "macc"
@@ -132,6 +132,19 @@ def desired(db, nas):
     lists = {}
     filt, nat = [], []
     macs, ips = exempt_for(db, nas)
+    from . import security
+    if security.rules(db)["router_block"]:      # locked MACs / IPs are dropped by the router's firewall too
+        lk_ips = set()
+        for lk in security.active_locks(db).filter(Lock.kind.in_(("mac", "ip"))):
+            if lk.kind == "ip":
+                lk_ips.add(lk.value)
+            else:
+                lk_ips.update(devices.current_ips(db, lk.value))
+        lk_ips -= set(ips)
+        if lk_ips:
+            lists["macc-lock"] = sorted(lk_ips)
+            filt.append({"chain": "forward", "src-address-list": "macc-lock", "action": "drop",
+                         "comment": f"{TAG} locked device"})
     lists[FREE] = ips                       # static part (exempt devices); grants add dynamic entries
     # sensitive objects of this router (or of every router)
     for o in db.query(NetObject).filter(NetObject.sensitive.is_(True),

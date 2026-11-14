@@ -1,1 +1,1 @@
-VERSION = "1.22.0"     # 2026-10-26: sortable tables, call reports by trunk / extension service / long and frequent
+VERSION = "1.25.1"     # 2026-11-14: incident note on locks, all IPs of a locked MAC blocked, /devices/ipmode permission

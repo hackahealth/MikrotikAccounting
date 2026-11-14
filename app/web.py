@@ -2188,6 +2188,14 @@ def devices_page(request: Request, q: str = "", status: str = "", nas: str = "",
                   night_time="%02d:%02d" % nightlist.check_time(db))
 
 
+@app.get("/devices/ipmode", response_class=HTMLResponse)
+def ipmode_page(request: Request, nas: str = ""):
+    db = SessionLocal()
+    dhcp, static, changed, ips = devices.ip_lists(db, int(nas) if nas.isdigit() else None)
+    return render(request, "ipmode.html", dhcp=dhcp, static=static, changed=changed, ips=ips, nas=nas,
+                  routers=db.query(Nas).order_by(Nas.name).all(), nas_names=_nas_names(db))
+
+
 # ------------------------------------------------------------------ nightly list of devices that are on
 def _night_ctx(request):
     db = SessionLocal()
@@ -3180,19 +3188,37 @@ async def security_lock(request: Request):
 async def security_unlock(request: Request, lock_id: int):
     form = await request.form()
     db = SessionLocal()
-    lk = security.unlock(db, lock_id, request.state.me.username)
+    note = str(form.get("note", "")).strip()
+    lk = security.unlock(db, lock_id, request.state.me.username, note)
     db.commit()
     if lk:
-        log_action(request, "باز کردن قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value}")
+        log_action(request, "باز کردن قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value}" +
+                   (f" — {note[:300]}" if note else ""))
         flash(request, f"قفل {lk.value} باز شد")
     return redirect(_local(form.get("back"), "/security"))
+
+
+@app.post("/security/{lock_id}/note")
+async def security_note(request: Request, lock_id: int):
+    form = await request.form()
+    db = SessionLocal()
+    note = str(form.get("note", "")).strip()
+    lk = security.set_note(db, lock_id, note)
+    db.commit()
+    if lk:
+        log_action(request, "شرح رخداد قفل", f"{security.KINDS.get(lk.kind, lk.kind)} {lk.value} — {note[:300]}")
+        flash(request, "شرح رخداد ذخیره شد")
+    return redirect(_local(form.get("back"), "/security") + f"#lock{lock_id}")
 
 
 @app.post("/security/rules")
 async def security_rules(request: Request):
     form = await request.form()
     db = SessionLocal()
-    for key in ("lock_fail_count", "lock_fail_hours", "lock_minutes"):
+    set_setting(db, "lock_router", "1" if form.get("lock_router") else "0")
+    set_setting(db, "lock_ip_change", "1" if form.get("lock_ip_change") else "0")
+    for key in ("lock_fail_count", "lock_fail_hours", "lock_minutes", "lock_any_count", "lock_rate_count",
+                "lock_rate_minutes"):
         v = _int(str(form.get(key, "")).translate(FA_TO_EN))
         if v is not None and v >= 0:
             set_setting(db, key, str(v))
