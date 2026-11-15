@@ -47,6 +47,7 @@ PERMISSIONS = {
     "net_monitor": "پایش روترها، تانل‌ها و سرورها",
     "alerts_view": "هشدارهای سیستم (قفل، قطعی)",
     "security_manage": "ورودهای ناموفق و قفل کاربر / MAC / IP",
+    "logon_guard": "نگهبان ورود به سرورها و ورود روی رایانهٔ غیرهمیشگی",
     "grants_manage": "مجوز موقت (خارج از ساعت / اینترنت آزاد)",
     "data_manage": "مدت نگهداری و حذف سابقه",
     "router_admin": "نسخه، بروزرسانی و ریبوت روترها",
@@ -65,7 +66,7 @@ ROLES = {
                           "reports_view", "reports_export", "devices_view", "devices_edit", "logs_view", "ad_sync",
                           "mt_local", "hotspot_deploy", "org_manage", "router_traffic", "pbx_manage", "net_monitor",
                           "alerts_view", "security_manage", "grants_manage", "router_admin", "access_manage",
-                          "ad_message"]),
+                          "ad_message", "logon_guard"]),
     "hr": ("کارشناس منابع انسانی", ["dashboard", "users_view", "reports_view", "reports_export", "mgmt_reports",
                                     "attendance", "calls_view"]),
     "unit_manager": ("مدیر دفتر / واحد", ["dashboard", "users_view", "live_view", "reports_view", "reports_export",
@@ -74,7 +75,7 @@ ROLES = {
 # Permissions a scoped (office / unit) panel user can never have: they only view their own staff.
 SCOPED_FORBIDDEN = {"users_edit", "groups_edit", "live_disconnect", "devices_edit", "nas_manage", "ad_sync",
                     "ad_manage", "settings", "panel_users", "audit_view", "mt_local", "hotspot_deploy", "org_manage",
-                    "devices_view", "logs_view", "pbx_manage", "net_monitor", "alerts_view", "security_manage",
+                    "devices_view", "logs_view", "pbx_manage", "net_monitor", "alerts_view", "security_manage", "logon_guard",
                     "grants_manage", "data_manage", "router_admin", "access_manage", "ad_message", "ad_admin", "pbx_admin"}
 
 # (method, path regex, permission | "a|b" any-of | "" = any logged-in user)
@@ -120,6 +121,7 @@ ROUTES = [
     ("GET", r"/proxy", "access_manage"), ("POST", r"/proxy/save", "access_manage"),
     ("GET", r"/access(/preview/\d+)?", "access_manage"), ("POST", r"/access/.*", "access_manage"),
     ("GET", r"/winlogons", "devices_view"),
+    ("GET", r"/guard(/target/\d+)?", "logon_guard"), ("POST", r"/guard/.*", "logon_guard"),
     ("GET", r"/messages", "ad_message"), ("POST", r"/messages/.*", "ad_message"),
     ("GET", r"/adm(/(users|user|groups|group|ous|computers|values))?", "ad_admin"), ("POST", r"/adm/.*", "ad_admin"),
     ("GET", r"/isx(/[a-z_]+(/(edit|new))?)?", "pbx_admin"), ("POST", r"/isx/.*", "pbx_admin"),

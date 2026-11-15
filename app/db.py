@@ -607,6 +607,52 @@ class DeviceTraffic(Base):
     __table_args__ = (UniqueConstraint("nas_id", "day", "mac", "ip", "target", "obj_id", "local_obj", name="uq_dt"),)
 
 
+class ProtectedTarget(Base):
+    """A server / device whose logons are guarded (logonguard.py): only the allowed AD groups / users, and only
+    from the allowed computers. Anything else (also a failed attempt) is a violation: blocked and recorded."""
+    __tablename__ = "protected_targets"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), nullable=False)
+    hosts = Column(Text, default="")                          # computer names of the server (NetBIOS / FQDN), per line
+    addresses = Column(Text, default="")                      # its IPs (empty = resolved from the names)
+    allowed_groups = Column(Text, default="")                 # AD groups (name or DN) whose members may log on
+    allowed_users = Column(Text, default="")                  # single accounts allowed too (service accounts ...)
+    allowed_computers = Column(Text, default="")              # source computers: name, IP, CIDR or range (empty = any)
+    read_direct = Column(Boolean, default=True)               # also read 4624/4625 from the server's own Security log
+    action = Column(String(10), default="block")              # block | alarm
+    disable_ad = Column(Boolean, default=True)                # block: disable the account in Active Directory
+    lock_user = Column(Boolean, default=True)                 # block: lock the user (hotspot / VPN / proxy)
+    lock_source = Column(Boolean, default=True)               # block: lock the source computer (router drops it)
+    net_block = Column(Boolean, default=False)                # router: only the allowed computers reach its addresses
+    enabled = Column(Boolean, default=True)
+    note = Column(String(500), default="")
+    status = Column(String(500), default="")                  # last read of its events
+    created_at = Column(DateTime, default=now)
+
+
+class LogonViolation(Base):
+    """A logon / logon attempt to a protected target by a user or from a computer that is not allowed."""
+    __tablename__ = "logon_violations"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)            # first seen
+    last_ts = Column(DateTime, default=now)
+    count = Column(Integer, default=1)
+    username = Column(String(150), index=True)
+    target_id = Column(Integer, index=True)
+    target = Column(String(150), default="")
+    outcome = Column(String(10), default="ok")                # ok (logged on / got a ticket) | fail (attempt)
+    how = Column(String(60), default="")                      # RDP, network (SMB ...), console, Kerberos ticket ...
+    src_ip = Column(String(45), default="")
+    src_mac = Column(String(17), default="")
+    src_name = Column(String(150), default="")
+    reasons = Column(String(500), default="")                 # why it is a violation
+    actions = Column(String(1000), default="")                # what was done (AD disabled, locks ...)
+    event = Column(String(300), default="")                   # event id / server / status
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String(100), default="")
+    note = Column(Text, default="")
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key = Column(String(100), primary_key=True)

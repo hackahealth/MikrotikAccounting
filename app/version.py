@@ -1,1 +1,1 @@
-VERSION = "1.25.1"     # 2026-11-14: incident note on locks, all IPs of a locked MAC blocked, /devices/ipmode permission
+VERSION = "1.26.0"     # 2026-11-15: logon guard for protected servers, logons on an unusual computer

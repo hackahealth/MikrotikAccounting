@@ -85,5 +85,6 @@ BIG_FLOW_BYTES = int(os.environ.get("BIG_FLOW_BYTES", str(20 * 1024 * 1024)))
 # Keep raw speed samples this many days
 SAMPLE_RETENTION_DAYS = int(os.environ.get("SAMPLE_RETENTION_DAYS", "400"))
 LOGON_SYNC_EVERY = int(os.environ.get("LOGON_SYNC_EVERY", "120"))   # Windows logons read from the DCs
+GUARD_SYNC_EVERY = int(os.environ.get("GUARD_SYNC_EVERY", "60"))   # logons to protected servers checked
 PBX_SYNC_EVERY = int(os.environ.get("PBX_SYNC_EVERY", "60"))       # Issabel call records (CDR) read
 IFACE_SAMPLE_DAYS = int(os.environ.get("IFACE_SAMPLE_DAYS", "14"))   # per-minute interface counters (graphs)

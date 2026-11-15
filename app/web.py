@@ -24,10 +24,10 @@ from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logons, monitor, nightlist, pbx,
+from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logonguard, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
-                 ExtensionAssignment, Group, NightList, PbxServer,
+                 ExtensionAssignment, Group, LogonViolation, NightList, PbxServer, ProtectedTarget,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
 from .version import VERSION
@@ -3785,6 +3785,147 @@ def winlogons_page(request: Request, q: str = "", frm: str = "", to: str = ""):
         ips[r.id] = (h.value, h.nas_id) if h else ((devs[r.mac].last_ip, devs[r.mac].last_nas_id) if r.mac in devs else ("", None))
     return render(request, "winlogons.html", rows=rows, devs=devs, ips=ips, q=q, frm=jalali.to_jalali_str(d1),
                   to=jalali.to_jalali_str(d2), nas_names=_nas_names(db))
+
+
+# ------------------------------------------------------------------ logon guard: protected servers, unusual logons
+@app.get("/guard", response_class=HTMLResponse)
+def logonguard_page(request: Request, tab: str = "violations", q: str = "", frm: str = "", to: str = "",
+                    show: str = "open"):
+    db = SessionLocal()
+    d1, d2 = _date(frm), _date(to)
+    d2 = d2 or now().date()
+    d1 = d1 or (d2 - timedelta(days=7))
+    start, end = datetime.combine(d1, datetime.min.time()), datetime.combine(d2 + timedelta(days=1), datetime.min.time())
+    q = q.strip()
+    ctx = {"tab": tab, "q": q, "frm": jalali.to_jalali_str(d1), "to": jalali.to_jalali_str(d2), "show": show,
+           "targets": db.query(ProtectedTarget).order_by(ProtectedTarget.name).all(), "actions": logonguard.ACTIONS,
+           "status": get_setting(db, "guard_status"), "error": get_setting(db, "guard_error"),
+           "error_hint": logons.hint(get_setting(db, "guard_error")),
+           "ignore_users": get_setting(db, "guard_ignore_users"), "dc_on": bool(logons.settings(db)["dcs"])}
+    if tab == "unusual":
+        rows = logonguard.unusual(db, start, end, q=q)
+        macs = {r.mac for r, _ in rows} | {m for _, u in rows for m in u}
+        ctx.update(rows=rows, devs={d.mac: d for d in db.query(Device).filter(Device.mac.in_(macs or {"-"}))})
+    elif tab == "violations":
+        vq = db.query(LogonViolation).filter(LogonViolation.last_ts >= start, LogonViolation.ts < end)
+        if show == "open":
+            vq = vq.filter(LogonViolation.resolved_at.is_(None))
+        if q:
+            vq = vq.filter(LogonViolation.username.ilike(f"%{q}%") | LogonViolation.target.ilike(f"%{q}%")
+                           | LogonViolation.src_name.ilike(f"%{q}%") | LogonViolation.src_ip.ilike(f"%{q}%"))
+        ctx["rows"] = vq.order_by(LogonViolation.ts.desc()).limit(1000).all()
+        ctx["n_open"] = db.query(LogonViolation).filter(LogonViolation.resolved_at.is_(None)).count()
+    return render(request, "logonguard.html", **ctx)
+
+
+@app.get("/guard/target/{tid}", response_class=HTMLResponse)
+def logonguard_target(request: Request, tid: int):
+    db = SessionLocal()
+    t = db.get(ProtectedTarget, tid) if tid else None
+    return render(request, "logonguard_target.html", t=t or ProtectedTarget(read_direct=True, action="block",
+                                                                            disable_ad=True, lock_user=True,
+                                                                            lock_source=True, enabled=True),
+                  actions=logonguard.ACTIONS)
+
+
+@app.post("/guard/target/save")
+async def logonguard_target_save(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    tid = _int(form.get("id"), 0)
+    t = db.get(ProtectedTarget, tid) if tid else None
+    name = str(form.get("name", "")).strip()
+    hosts = str(form.get("hosts", "")).strip()
+    if not name or not (hosts or str(form.get("addresses", "")).strip()):
+        flash(request, "نام و نام رایانه (یا IP) سرور را وارد کنید", "err")
+        return redirect(f"/guard/target/{tid}")
+    groups = str(form.get("allowed_groups", "")).strip()
+    users = str(form.get("allowed_users", "")).strip()
+    if not groups and not users:
+        flash(request, "حداقل یک گروه یا کاربر مجاز لازم است (وگرنه هر ورودی تخلف است)", "err")
+        return redirect(f"/guard/target/{tid}")
+    bad = [a for a in access.tokens(form.get("addresses", "")) if not access._is_addr(a)]
+    if bad:
+        flash(request, "IP نادرست: " + " ".join(bad[:5]), "err")
+        return redirect(f"/guard/target/{tid}")
+    if t is None:
+        t = ProtectedTarget(name=name)
+        db.add(t)
+    t.name, t.hosts = name[:150], hosts[:2000]
+    t.addresses = str(form.get("addresses", "")).strip()[:2000]
+    t.allowed_groups, t.allowed_users = groups[:4000], users[:4000]
+    t.allowed_computers = str(form.get("allowed_computers", "")).strip()[:4000]
+    t.action = "alarm" if form.get("action") == "alarm" else "block"
+    for k in ("read_direct", "disable_ad", "lock_user", "lock_source", "net_block", "enabled"):
+        setattr(t, k, _bool(form, k))
+    t.note = str(form.get("note", "")).strip()[:500]
+    db.commit()
+    logonguard._groups.clear()
+    log_action(request, "سرور حفاظت‌شده", f"{t.name}: {t.action}")
+    flash(request, f"{t.name} ذخیره شد")
+    return redirect("/guard?tab=targets")
+
+
+@app.post("/guard/target/{tid}/delete")
+def logonguard_target_delete(request: Request, tid: int):
+    db = SessionLocal()
+    t = db.get(ProtectedTarget, tid)
+    if t:
+        log_action(request, "حذف سرور حفاظت‌شده", t.name)
+        db.delete(t)
+        db.commit()
+    return redirect("/guard?tab=targets")
+
+
+@app.post("/guard/settings")
+async def logonguard_settings(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    set_setting(db, "guard_ignore_users", str(form.get("guard_ignore_users", "")).strip()[:2000])
+    db.commit()
+    if form.get("run"):
+        await run_in_threadpool(logonguard.sync)
+        flash(request, "رویدادها خوانده شد")
+    else:
+        flash(request, "ذخیره شد")
+    return redirect("/guard?tab=targets")
+
+
+@app.post("/guard/violation/{vid}/resolve")
+async def logonguard_resolve(request: Request, vid: int):
+    """Close a violation with a note; optionally enable the AD account again and release the locks it made."""
+    form = await request.form()
+    db = SessionLocal()
+    v = db.get(LogonViolation, vid)
+    if v is None:
+        return redirect("/guard")
+    me = request.state.me.username
+    note = str(form.get("note", "")).strip()
+    done = []
+    if form.get("release"):
+        for lk in security.active_locks(db).filter(Lock.created_by == "نگهبان ورود"):
+            if (lk.kind == "user" and lk.value.lower() == v.username.lower()) or \
+                    (lk.kind == "mac" and v.src_mac and lk.value.lower() == v.src_mac.lower()) or \
+                    (lk.kind == "ip" and v.src_ip and lk.value == v.src_ip):
+                security.unlock(db, lk.id, me, note)
+                done.append(f"قفل {security.KINDS[lk.kind]} {lk.value} باز شد")
+        if "حساب AD غیرفعال شد" in (v.actions or ""):
+            try:
+                def enable():
+                    with ad_admin.AD(db) as ad:
+                        dn = ad.find_user(v.username)
+                        if dn:
+                            ad.set_enabled(dn, True)
+                await run_in_threadpool(enable)
+                done.append("حساب AD دوباره فعال شد")
+            except Exception as e:  # noqa: BLE001
+                done.append(f"فعال‌سازی AD ناموفق: {e}")
+    v.resolved_at, v.resolved_by = now(), me
+    v.note = "\n".join(x for x in (note, " · ".join(done)) if x)[:4000]
+    db.commit()
+    log_action(request, "رسیدگی تخلف ورود", f"{v.username} → {v.target}: {' · '.join(done) or 'بسته شد'}")
+    flash(request, " · ".join(done) or "بسته شد")
+    return redirect(_local(form.get("back"), "/guard"))
 
 
 @app.get("/messages", response_class=HTMLResponse)

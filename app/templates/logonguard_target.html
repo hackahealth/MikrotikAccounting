@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>{{ 'ویرایش ' ~ t.name if t.id else 'افزودن سرور / تجهیز حفاظت‌شده' }}</h2><a class="btn" href="/guard?tab=targets">بازگشت</a></div>
+<div class="card"><form method="post" action="/guard/target/save">{% if t.id %}<input type="hidden" name="id" value="{{ t.id }}">{% endif %}
+<div class="grid g3">
+  <div class="fg"><label>نام</label><input name="name" value="{{ t.name or '' }}" placeholder="سرور مالی" required></div>
+  <div class="fg"><label>نام رایانهٔ سرور (هر خط یکی؛ NetBIOS یا FQDN)</label><textarea name="hosts" class="ltr" rows="2" placeholder="SRV-FIN&#10;srv-fin.bc.local">{{ t.hosts or '' }}</textarea></div>
+  <div class="fg"><label>IP سرور (خالی = از نام پیدا می‌شود)</label><textarea name="addresses" class="ltr" rows="2" placeholder="192.168.1.20">{{ t.addresses or '' }}</textarea></div>
+  <div class="fg"><label>گروه‌های AD مجاز (نام یا DN، هر خط یکی؛ گروه‌های تودرتو هم حساب می‌شوند)</label><textarea name="allowed_groups" class="ltr" rows="3" placeholder="FIN-Server-Admins">{{ t.allowed_groups or '' }}</textarea></div>
+  <div class="fg"><label>کاربران مجاز جدا (هر خط یکی، مثلاً حساب‌های سرویس)</label><textarea name="allowed_users" class="ltr" rows="3" placeholder="svc-backup">{{ t.allowed_users or '' }}</textarea></div>
+  <div class="fg"><label>رایانه‌های مجاز (نام رایانه، MAC، IP، رنج یا CIDR؛ خالی = همه)</label><textarea name="allowed_computers" class="ltr" rows="3" placeholder="IT-PC01&#10;192.168.1.50">{{ t.allowed_computers or '' }}</textarea></div>
+  <div class="fg"><label>عمل در برابر تخلف</label><select name="action">{% for k, v in actions.items() %}<option value="{{ k }}" {{ 'selected' if t.action == k }}>{{ v }}</option>{% endfor %}</select>
+    <label><input type="checkbox" name="disable_ad" value="1" {{ 'checked' if t.disable_ad }}> حساب کاربر در AD غیرفعال شود</label>
+    <label><input type="checkbox" name="lock_user" value="1" {{ 'checked' if t.lock_user }}> کاربر قفل شود (هات‌اسپات / VPN / پراکسی)</label>
+    <label><input type="checkbox" name="lock_source" value="1" {{ 'checked' if t.lock_source }}> رایانهٔ مبدأ قفل شود (روتر آن را مسدود می‌کند)</label></div>
+  <div class="fg"><label>منابع و لایهٔ شبکه</label>
+    <label><input type="checkbox" name="read_direct" value="1" {{ 'checked' if t.read_direct }}> Security Log خود سرور هم خوانده شود (RDP، کنسول، اشتراک فایل؛ با IP و نام رایانهٔ مبدأ)</label>
+    <label><input type="checkbox" name="net_block" value="1" {{ 'checked' if t.net_block }}> روتر هم فقط به رایانه‌های مجاز اجازهٔ رسیدن به این سرور را بدهد (روترهایی که «کنترل دسترسی» دارند؛ ترافیک داخل همان شبکه از روتر نمی‌گذرد)</label>
+    <label><input type="checkbox" name="enabled" value="1" {{ 'checked' if t.enabled }}> فعال</label></div>
+  <div class="fg"><label>توضیح</label><input name="note" value="{{ t.note or '' }}"></div>
+</div>
+<button class="btn p">ذخیره</button></form>
+<p class="hint">تخلف: ورود یا درخواست ورود (حتی ناموفق) کاربری که عضو گروه‌ها / فهرست مجاز نیست، یا ورود از رایانه‌ای که در فهرست رایانه‌های مجاز نیست. ورود پشت خود سرور (کنسول) از نظر رایانهٔ مبدأ مجاز است ولی کاربر باید مجاز باشد.</p></div>
+{% endblock %}

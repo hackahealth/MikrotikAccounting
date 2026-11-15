@@ -164,6 +164,19 @@ def desired(db, nas):
                          comment=f"{TAG} sensitive {o.id}: {o.name}"[:200]))
         if o.sensitive_action == "block":
             filt.append(dict(base, action="drop", comment=f"{TAG} sensitive block {o.id}"))
+    # protected servers (logon guard): only the allowed computers reach them through the router
+    from . import logonguard
+    for t, addrs, ok_ips in logonguard.router_rules(db):
+        lst, ok = f"macc-p{t.id}", f"macc-p{t.id}-ok"
+        lists[lst] = addrs
+        base = {"chain": "forward", "connection-state": "new", "dst-address-list": lst}
+        if ok_ips:
+            lists[ok] = ok_ips
+            base["src-address-list"] = "!" + ok
+        filt.append(dict(base, action="add-src-to-address-list", **{"address-list": f"{VIOL_PREFIX}p{t.id}",
+                                                                     "address-list-timeout": "1h"},
+                         comment=f"{TAG} protected {t.id}: {t.name}"[:200]))
+        filt.append(dict(base, action="drop", comment=f"{TAG} protected block {t.id}"))
     # internal destinations after login
     if st["internal_restrict"]:
         ok = tokens(st["allowed_internal"])
@@ -362,6 +375,10 @@ def violations(db, nas, address_list):
         who = " / ".join(x for x in (d.label or d.hostname, d.logon_user, d.last_user, d.mac) if x) if d else ""
         if key == "int":
             title = f"دسترسی غیرمجاز به شبکهٔ داخلی از {ip}"
+        elif key.startswith("p") and key[1:].isdigit():
+            from .db import ProtectedTarget
+            t = db.get(ProtectedTarget, int(key[1:]))
+            title = f"دسترسی شبکه‌ای غیرمجاز به {t.name if t else 'سرور حفاظت‌شده'} از {ip} (روتر مسدود کرد)"
         else:
             o = objs.get(int(key)) if key.isdigit() else None
             title = f"دسترسی غیرمجاز به {o.name if o else 'آدرس حساس'} از {ip}"
