@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import timedelta
 
-from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logons, monitor,
+from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logonguard, logons, monitor,
                netscope, nightlist, pbx, pingcheck, policy, retention, routeros, security, wancheck)
 from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
@@ -282,6 +282,7 @@ def start():
     _every(config.LDAP_SYNC_EVERY, ldap_job)
     _every(config.PBX_SYNC_EVERY, pbx.sync_all)
     _every(config.LOGON_SYNC_EVERY, logons.sync_dcs)
+    _every(config.GUARD_SYNC_EVERY, logonguard.sync)
     _every(60, nightlist.job)
     _every(60, access.job)
     _every(quotamsg.EVERY, quotamsg.job)

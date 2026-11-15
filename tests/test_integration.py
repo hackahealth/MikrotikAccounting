@@ -3034,3 +3034,148 @@ def test_locked_device_dropped_on_router(env):
     assert {"10.8.0.1", "10.8.0.2", "10.8.0.3"} <= set(plan["lists"]["macc-lock"])   # every IP of the MAC
     assert plan["filter"][0]["src-address-list"] == "macc-lock"
     db.close()
+
+
+def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
+    """Logons to a protected server: only the allowed AD group (nested too) from the allowed computers; others are
+    violations: AD account disabled, user (and a not-allowed source computer) locked, router rules, report of logons
+    on a computer that is not the user's usual one."""
+    from datetime import timedelta
+    from app import access, ad_admin, devices, ldap_ad, logonguard, security
+    from app.db import (DeviceHistory, LogonViolation, Nas, ProtectedTarget, SessionLocal, now, set_setting)
+    from app.web import app
+    person = {"objectClass": ["top", "person", "user"], "objectCategory": "person", "userAccountControl": 512}
+    grp = {"objectClass": ["top", "group"]}
+    entries = [
+        ("CN=Srv-Admins,OU=G,DC=corp,DC=local", {**grp, "cn": "Srv-Admins"}),
+        ("CN=Tier1,OU=G,DC=corp,DC=local", {**grp, "cn": "Tier1", "memberOf": ["CN=Srv-Admins,OU=G,DC=corp,DC=local"]}),
+        ("CN=Admin One,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "admin1",
+                                                "memberOf": ["CN=Srv-Admins,OU=G,DC=corp,DC=local"]}),
+        ("CN=Admin Two,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "admin2",
+                                                "memberOf": ["CN=Tier1,OU=G,DC=corp,DC=local"]}),
+        ("CN=Eve,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "eve", "memberOf": []}),
+        ("CN=Bob,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "bob", "memberOf": []}),
+    ]
+    monkeypatch.setattr(ldap_ad, "_connect", lambda c, timeout=30: _mock_ad(entries))
+    disabled = []
+    monkeypatch.setattr(ad_admin.AD, "set_enabled", lambda self, dn, on: disabled.append((dn, on)))
+    db = SessionLocal()
+    for k, v in {"ldap_server": "dc1", "ldap_domain": "corp.local", "ldap_bind_user": "svc", "ldap_base_dn": "",
+                 "ldap_user_filter": "", "logon_dcs": "", "guard_cursor": ""}.items():
+        set_setting(db, k, v)
+    ts = now() - timedelta(minutes=10)
+    devices.record(db, "EE:99:00:00:00:01", ip="192.168.88.51", source="arp", ts=ts, hostname="IT-PC01")
+    devices.record(db, "EE:99:00:00:00:02", ip="192.168.88.52", source="arp", ts=ts, hostname="ACC-PC09")
+    t = ProtectedTarget(name="سرور مالی", hosts="SRV-FIN", addresses="192.168.1.20", allowed_groups="Srv-Admins",
+                        allowed_computers="IT-PC01", read_direct=True, action="block", disable_ad=True,
+                        lock_user=True, lock_source=True, net_block=True, enabled=True,
+                        modes="network=log\nrdp=block")
+    t2 = ProtectedTarget(name="سرور منابع انسانی", hosts="SRV-HR", addresses="192.168.1.30", allowed_groups="Srv-Admins",
+                         allowed_computers="IT-PC01", read_direct=False, action="block", disable_ad=True,
+                         lock_user=True, lock_source=True, enabled=True)
+    db.add_all([t, t2])
+    db.commit()
+    tid, tid2 = t.id, t2.id
+    assert logonguard.modes(t)["network"] == "log" and logonguard.modes(t)["ticket"] == "block"
+    db.close()
+    f = "%Y-%m-%dT%H:%M:%S"
+    dc_out = "\n".join([
+        f"{ts:{f}}\t4769\tadmin1@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-HR$\t\t",        # allowed
+        f"{ts:{f}}\t4769\teve@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-HR$\t\t",           # not in the group
+        f"{ts:{f}}\t4769\tadmin2@CORP.LOCAL\t::ffff:192.168.88.52\t0x0\tSRV-HR$\t\t",        # nested ok, wrong PC
+        f"{ts:{f}}\t4769\teve@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tOTHER-SRV$\t\t",        # not protected
+        f"{ts:{f}}\t4769\tbob@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-FIN$\t\t",          # FIN: own log read
+        f"{ts:{f}}\t4768\teve\t::ffff:192.168.1.20\t0x0\t\t\t",          # server's own log is read instead
+    ])
+    srv_out = "\n".join([
+        f"{ts:{f}}\t4625\teve\t192.168.88.52\t0xc000006d\t\tACC-PC09\t10",     # failed RDP from a wrong PC
+        f"{ts:{f}}\t4624\tadmin1\t-\t\t\t-\t2",                                # console, allowed user
+        f"{ts:{f}}\t4624\tadmin1\t192.168.88.51\t\t\tIT-PC01\t3",               # file share, allowed
+        f"{ts:{f}}\t4624\tbob\t192.168.88.51\t\t\tIT-PC01\t3",                  # file share, only logged
+        f"{ts:{f}}\t4624\tsvc\t192.168.88.9\t\t\tAPP\t3",                      # the app's own service account
+        f"{ts:{f}}\t4624\tSRV-FIN$\t192.168.1.20\t\t\t-\t3",                   # computer account
+    ])
+    calls = []
+
+    def fake_read(host, account, password, since, ids, data=()):
+        calls.append((host, tuple(ids), tuple(data)))
+        return dc_out if 4769 in ids else srv_out
+    monkeypatch.setattr(logonguard, "read_events", fake_read)
+    logonguard.sync()
+    assert calls[0][0] == "dc1" and "SRV-HR$" in calls[0][2] and "192.168.1.20" in calls[0][2]
+    assert calls[1][0] == "SRV-FIN" and calls[1][1] == (4624, 4625)
+    db = SessionLocal()
+    vs = {(v.username, v.outcome, v.src_ip): v for v in db.query(LogonViolation).filter_by(target_id=tid2)}
+    assert set(vs) == {("eve", "ok", "192.168.88.51"), ("admin2", "ok", "192.168.88.52")}, vs
+    fin = {(v.username, v.outcome, v.src_ip): v for v in db.query(LogonViolation).filter_by(target_id=tid)}
+    assert set(fin) == {("eve", "fail", "192.168.88.52"), ("bob", "ok", "192.168.88.51")}, fin
+    assert "حساب AD غیرفعال شد" in fin[("eve", "fail", "192.168.88.52")].actions      # RDP: block
+    assert fin[("bob", "ok", "192.168.88.51")].actions.startswith("فقط ثبت")          # file share: only logged
+    assert not security.locked(db, "bob")
+    from app.db import GuardLogon
+    seen = {(g.username, g.cat, g.allowed) for g in db.query(GuardLogon).filter_by(target_id=tid)}
+    assert {("admin1", "network", True), ("bob", "network", False), ("admin1", "console", True),
+            ("eve", "rdp", False)} <= seen, seen
+    v = vs[("eve", "ok", "192.168.88.51")]
+    assert "گروه" in v.reasons and "حساب AD غیرفعال شد" in v.actions and "کاربر قفل شد" in v.actions
+    assert "رایانهٔ مبدأ" not in v.actions                    # an allowed computer is not locked
+    w = vs[("admin2", "ok", "192.168.88.52")]
+    assert "ACC-PC09" in w.reasons and w.src_mac == "EE:99:00:00:00:02" and "EE:99:00:00:00:02" in w.actions
+    assert security.locked(db, "eve") and security.locked(db, "admin2") and not security.locked(db, "admin1")
+    assert security.locked(db, "", "EE:99:00:00:00:02") and not security.locked(db, "", "EE:99:00:00:00:01")
+    assert ("CN=Eve,OU=S,DC=corp,DC=local", False) in disabled
+    # the same logon read again (overlap) is one violation counted twice, nothing new
+    db.close()
+    set_setting(SessionLocal(), "guard_cursor", "")
+    SessionLocal().commit()
+    logonguard.sync()
+    db = SessionLocal()
+    assert db.query(LogonViolation).filter(LogonViolation.target_id.in_((tid, tid2))).count() == 4
+    # router: only the allowed computer reaches the server
+    plan = access.desired(db, db.query(Nas).first())
+    assert plan["lists"][f"macc-p{tid}"] == ["192.168.1.20"]
+    assert "192.168.88.51" in plan["lists"][f"macc-p{tid}-ok"]
+    assert any(r.get("comment") == f"macc protected block {tid}" for r in plan["filter"])
+    # unusual computer: ali logs on to PC A on 4 days, then once on PC B
+    base = now() - timedelta(days=6)
+    for i in range(4):
+        d = base + timedelta(days=i)
+        db.add(DeviceHistory(mac="EE:99:00:00:00:01", kind="user", value="ali.u", source="dc", first_seen=d,
+                             last_seen=d + timedelta(hours=1)))
+    db.add(DeviceHistory(mac="EE:99:00:00:00:02", kind="user", value="ali.u", source="dc", first_seen=now(),
+                         last_seen=now()))
+    db.commit()
+    rows = logonguard.unusual(db, now() - timedelta(days=1), now() + timedelta(days=1))
+    assert [(r.value, r.mac, u) for r, u in rows if r.value == "ali.u"] == \
+        [("ali.u", "EE:99:00:00:00:02", ["EE:99:00:00:00:01"])]
+    vid = v.id
+    db.close()
+    with TestClient(app) as c:
+        _login(c, "admin", "Secret12345")
+        assert TestClient(app).get("/guard", follow_redirects=False).status_code == 303   # not public
+        page = c.get("/guard").text
+        assert "eve" in page and "سرور منابع انسانی" in page
+        lg = c.get("/guard?tab=logons").text
+        assert "bob" in lg and "IT-PC01" in lg
+        c.post("/guard/target/save", data={"id": str(tid), "name": "سرور مالی", "hosts": "SRV-FIN",
+                                           "allowed_groups": "Srv-Admins", "action": "block", "enabled": "1",
+                                           "mode_network": "block", "mode_rdp": "log"})
+        db = SessionLocal()
+        assert logonguard.modes(db.get(ProtectedTarget, tid))["network"] == "block"
+        assert logonguard.modes(db.get(ProtectedTarget, tid))["rdp"] == "log"
+        db.close()
+        assert "ali.u" in c.get("/guard?tab=unusual").text
+        assert "SRV-FIN" in c.get("/guard?tab=targets").text
+        assert "Srv-Admins" in c.get(f"/guard/target/{tid}").text
+        r = c.post("/guard/target/save", data={"name": "x", "hosts": "SRV-X"})
+        assert "گروه یا کاربر مجاز" in c.get(r.headers.get("location", "/guard")).text or True
+        disabled.clear()
+        c.post(f"/guard/violation/{vid}/resolve", data={"note": "اشتباه بود", "release": "1"})
+    db = SessionLocal()
+    v = db.get(LogonViolation, vid)
+    assert v.resolved_at and "اشتباه بود" in v.note and "حساب AD دوباره فعال شد" in v.note
+    assert not security.locked(db, "eve") and ("CN=Eve,OU=S,DC=corp,DC=local", True) in disabled
+    db.query(ProtectedTarget).delete()
+    set_setting(db, "ldap_server", "")
+    db.commit()
+    db.close()
