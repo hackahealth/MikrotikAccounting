@@ -22,8 +22,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import func
 
 from . import alerts, devices, logons, netscope, security
-from .db import (Device, DeviceHistory, LogonViolation, ProtectedTarget, SessionLocal, get_setting, now,
-                 set_setting)
+from .db import (Device, DeviceHistory, GuardLogon, LogonViolation, ProtectedTarget, SessionLocal, get_setting,
+                 now, set_setting)
 
 log = logging.getLogger("logonguard")
 _LOCK = threading.Lock()
@@ -34,6 +34,23 @@ LOGON_TYPES = {"2": "کنسول", "3": "شبکه (SMB / اشتراک فایل ..
                "10": "ریموت دسکتاپ (RDP)", "11": "کنسول (رمز کش‌شده)"}
 LOCAL_TYPES = ("2", "7", "11")      # sitting at the server itself
 ACTIONS = {"block": "مسدود (غیرفعال‌سازی و قفل)", "alarm": "فقط ثبت و هشدار"}
+# logon types; each can be "block" (violation -> blocked) or "log" (violation only recorded and alarmed)
+CATS = {"network": "اشتراک فایل / شبکه (SMB)", "rdp": "ریموت دسکتاپ (RDP)", "console": "کنسول / باز کردن قفل",
+        "ticket": "درخواست دسترسی (تیکت Kerberos، از کنترلر دامنه)",
+        "interactive": "ورود تعاملی دیده‌شده در کنترلر دامنه (بدون خواندن لاگ سرور)"}
+MODES = {"block": "بلاک مستقیم", "log": "فقط ثبت و هشدار"}
+LTYPE_CAT = {"2": "console", "7": "console", "11": "console", "3": "network", "8": "network", "10": "rdp"}
+
+
+def modes(t):
+    """{cat: block|log} of a target; types not set follow the target's action."""
+    out = {}
+    for line in (t.modes or "").splitlines():
+        k, _, v = line.partition("=")
+        if k.strip() in CATS and v.strip() in MODES:
+            out[k.strip()] = v.strip()
+    default = "block" if (t.action or "block") == "block" else "log"
+    return {c: out.get(c, default) for c in CATS}
 
 # Get-WinEvent against one host with the AD service account; ids / data filter from the environment.
 PS_SCRIPT = r"""
@@ -243,7 +260,7 @@ def ignored_users(db):
 
 
 def check(db, t, ev):
-    """ev: {ts, user, ip, ws, outcome, how, event, local}. Returns the LogonViolation (new or repeated) or None."""
+    """ev: {ts, user, ip, ws, outcome, how, cat, event, local}. Returns the LogonViolation (new or repeated) or None."""
     user = ev["user"]
     if not user or user.lower() in ignored_users(db):
         return None
@@ -261,6 +278,7 @@ def check(db, t, ev):
             reasons.append(f"از رایانهٔ غیرمجاز {name or ev['ip']}")
     if ev["outcome"] == "fail" and reasons:
         reasons.append("تلاش ناموفق ورود")
+    seen = note_logon(db, t, ev, user, mac, name, not reasons)
     if not reasons:
         if unsure:
             log.warning("%s on %s: %s", user, t.name, unsure)
@@ -274,6 +292,7 @@ def check(db, t, ev):
         if ev["ts"] > prev.last_ts:
             prev.last_ts = ev["ts"]
             prev.count = (prev.count or 1) + 1
+        seen.violation_id = prev.id
         return prev
     v = LogonViolation(ts=ev["ts"], last_ts=ev["ts"], username=user[:150], target_id=t.id, target=t.name[:150],
                        outcome=ev["outcome"], how=ev["how"][:60], src_ip=ev["ip"][:45], src_mac=mac or "",
@@ -281,12 +300,35 @@ def check(db, t, ev):
                        event=ev["event"][:300])
     db.add(v)
     db.flush()
-    v.actions = " · ".join(enforce(db, t, v) if t.action == "block" else ["فقط هشدار (عمل این سرور: هشدار)"])[:1000]
+    seen.violation_id = v.id
+    mode = modes(t).get(ev.get("cat", ""), "block" if t.action == "block" else "log")
+    v.actions = " · ".join(enforce(db, t, v) if mode == "block" else
+                           [f"فقط ثبت (برای «{CATS.get(ev.get('cat'), ev['how'])}» بلاک خاموش است)"])[:1000]
     what = "تلاش ورود" if v.outcome == "fail" else "ورود"
     alerts.add(db, "guard", f"{what} غیرمجاز {user} به {t.name}",
                f"{v.reasons} · مبدأ: {v.src_name or '-'} {v.src_ip} · {v.how} · اقدام: {v.actions}", "err",
                "/guard")
     return v
+
+
+def note_logon(db, t, ev, user, mac, name, allowed):
+    """Keep every logon to a protected target: one row per user / source / type / outcome / hour."""
+    cat = ev.get("cat", "")
+    g = db.query(GuardLogon).filter(GuardLogon.target_id == t.id, func.lower(GuardLogon.username) == user.lower(),
+                                    GuardLogon.src_ip == ev["ip"], GuardLogon.cat == cat,
+                                    GuardLogon.outcome == ev["outcome"],
+                                    GuardLogon.last_ts >= ev["ts"] - REPEAT).first()
+    if g is not None:
+        if ev["ts"] > g.last_ts:
+            g.last_ts, g.count = ev["ts"], (g.count or 1) + 1
+        g.allowed = g.allowed and allowed
+        return g
+    g = GuardLogon(ts=ev["ts"], last_ts=ev["ts"], target_id=t.id, target=t.name[:150], username=user[:150], cat=cat,
+                   how=ev["how"][:60], outcome=ev["outcome"], src_ip=ev["ip"][:45], src_mac=mac or "",
+                   src_name=(name or "")[:150], allowed=allowed)
+    db.add(g)
+    db.flush()
+    return g
 
 
 def enforce(db, t, v):
@@ -333,16 +375,16 @@ def from_dc(rows, targets):
         ok = r["status"] in ("", "0x0", "0")
         if r["id"] == "4769":
             t = by_name.get(_short(r["service"]))
-            if t is None or r["ip"] in target_ips(t):
-                continue
+            if t is None or t.read_direct or r["ip"] in target_ips(t):
+                continue           # with the server's own log read, its 4624/4625 tell the exact logon type
             out.append((t, {"ts": r["ts"], "user": r["user"], "ip": r["ip"], "ws": "", "local": False,
-                            "outcome": "ok" if ok else "fail", "how": "درخواست دسترسی (تیکت Kerberos)",
+                            "outcome": "ok" if ok else "fail", "how": "درخواست دسترسی (تیکت Kerberos)", "cat": "ticket",
                             "event": f"DC 4769 {r['service']} {r['status']}"}))
         elif r["id"] in ("4768", "4771") and r["ip"] in by_ip:
             t = by_ip[r["ip"]]
             if t.read_direct:          # the server's own log tells the source computer
                 continue
-            out.append((t, {"ts": r["ts"], "user": r["user"], "ip": "", "ws": "", "local": True,
+            out.append((t, {"ts": r["ts"], "user": r["user"], "ip": "", "ws": "", "local": True, "cat": "interactive",
                             "outcome": "ok" if r["id"] == "4768" and ok else "fail",
                             "how": "ورود تعاملی روی سرور (RDP / کنسول)", "event": f"DC {r['id']} {r['status']}"}))
     return out
@@ -356,7 +398,7 @@ def from_server(t, rows):
             continue
         local = r["ltype"] in LOCAL_TYPES or (not r["ip"] and not r["ws"]) or r["ip"] in own
         out.append((t, {"ts": r["ts"], "user": r["user"], "ip": "" if local else r["ip"],
-                        "ws": "" if local else r["ws"], "local": local,
+                        "ws": "" if local else r["ws"], "local": local, "cat": LTYPE_CAT[r["ltype"]],
                         "outcome": "ok" if r["id"] == "4624" else "fail", "how": LOGON_TYPES[r["ltype"]],
                         "event": f"{t.name} {r['id']} type {r['ltype']} {r['status']}".strip()}))
     return out

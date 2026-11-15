@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<style>.modes td{padding:3px 4px}.modes td:first-child{font-size:13px}</style>
 <div class="top"><h2>{{ 'ویرایش ' ~ t.name if t.id else 'افزودن سرور / تجهیز حفاظت‌شده' }}</h2><a class="btn" href="/guard?tab=targets">بازگشت</a></div>
 <div class="card"><form method="post" action="/guard/target/save">{% if t.id %}<input type="hidden" name="id" value="{{ t.id }}">{% endif %}
 <div class="grid g3">
@@ -9,7 +10,10 @@
   <div class="fg"><label>گروه‌های AD مجاز (نام یا DN، هر خط یکی؛ گروه‌های تودرتو هم حساب می‌شوند)</label><textarea name="allowed_groups" class="ltr" rows="3" placeholder="FIN-Server-Admins">{{ t.allowed_groups or '' }}</textarea></div>
   <div class="fg"><label>کاربران مجاز جدا (هر خط یکی، مثلاً حساب‌های سرویس)</label><textarea name="allowed_users" class="ltr" rows="3" placeholder="svc-backup">{{ t.allowed_users or '' }}</textarea></div>
   <div class="fg"><label>رایانه‌های مجاز (نام رایانه، MAC، IP، رنج یا CIDR؛ خالی = همه)</label><textarea name="allowed_computers" class="ltr" rows="3" placeholder="IT-PC01&#10;192.168.1.50">{{ t.allowed_computers or '' }}</textarea></div>
-  <div class="fg"><label>عمل در برابر تخلف</label><select name="action">{% for k, v in actions.items() %}<option value="{{ k }}" {{ 'selected' if t.action == k }}>{{ v }}</option>{% endfor %}</select>
+  <div class="fg"><label>تخلف در هر نوع ورود: بلاک مستقیم یا فقط ثبت و هشدار</label>
+    <table class="modes">{% for c, label in cats.items() %}<tr><td>{{ label }}</td><td><select name="mode_{{ c }}">{% for k, v in modes_fa.items() %}<option value="{{ k }}" {{ 'selected' if cur_modes[c] == k }}>{{ v }}</option>{% endfor %}</select></td></tr>{% endfor %}</table>
+    <input type="hidden" name="action" value="{{ t.action or 'block' }}"></div>
+  <div class="fg"><label>اقدام‌های «بلاک مستقیم»</label>
     <label><input type="checkbox" name="disable_ad" value="1" {{ 'checked' if t.disable_ad }}> حساب کاربر در AD غیرفعال شود</label>
     <label><input type="checkbox" name="lock_user" value="1" {{ 'checked' if t.lock_user }}> کاربر قفل شود (هات‌اسپات / VPN / پراکسی)</label>
     <label><input type="checkbox" name="lock_source" value="1" {{ 'checked' if t.lock_source }}> رایانهٔ مبدأ قفل شود (روتر آن را مسدود می‌کند)</label></div>
@@ -20,5 +24,5 @@
   <div class="fg"><label>توضیح</label><input name="note" value="{{ t.note or '' }}"></div>
 </div>
 <button class="btn p">ذخیره</button></form>
-<p class="hint">تخلف: ورود یا درخواست ورود (حتی ناموفق) کاربری که عضو گروه‌ها / فهرست مجاز نیست، یا ورود از رایانه‌ای که در فهرست رایانه‌های مجاز نیست. ورود پشت خود سرور (کنسول) از نظر رایانهٔ مبدأ مجاز است ولی کاربر باید مجاز باشد.</p></div>
+<p class="hint">همهٔ ورودها (مجاز و غیرمجاز) با کاربر و رایانهٔ مبدأ در زبانهٔ «ورودها به سرورها» ثبت می‌شود. «فقط ثبت و هشدار» تخلف را ثبت و اعلان می‌کند ولی کاربر و رایانه را مسدود نمی‌کند. وقتی Security Log خود سرور خوانده می‌شود، نوع دقیق ورود از همان لاگ می‌آید و ردیف‌های «تیکت Kerberos» و «ورود تعاملی DC» استفاده نمی‌شوند. تخلف: ورود یا درخواست ورود (حتی ناموفق) کاربری که عضو گروه‌ها / فهرست مجاز نیست، یا ورود از رایانه‌ای که در فهرست رایانه‌های مجاز نیست. ورود پشت خود سرور (کنسول) از نظر رایانهٔ مبدأ مجاز است ولی کاربر باید مجاز باشد.</p></div>
 {% endblock %}

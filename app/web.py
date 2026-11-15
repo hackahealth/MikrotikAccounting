@@ -27,7 +27,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logonguard, logons, monitor, nightlist, pbx,
                jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
-                 ExtensionAssignment, Group, LogonViolation, NightList, PbxServer, ProtectedTarget,
+                 ExtensionAssignment, Group, GuardLogon, LogonViolation, NightList, PbxServer, ProtectedTarget,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
 from .version import VERSION
@@ -3799,6 +3799,7 @@ def logonguard_page(request: Request, tab: str = "violations", q: str = "", frm:
     q = q.strip()
     ctx = {"tab": tab, "q": q, "frm": jalali.to_jalali_str(d1), "to": jalali.to_jalali_str(d2), "show": show,
            "targets": db.query(ProtectedTarget).order_by(ProtectedTarget.name).all(), "actions": logonguard.ACTIONS,
+           "cats": logonguard.CATS, "modes_fa": logonguard.MODES, "modes_of": logonguard.modes,
            "status": get_setting(db, "guard_status"), "error": get_setting(db, "guard_error"),
            "error_hint": logons.hint(get_setting(db, "guard_error")),
            "ignore_users": get_setting(db, "guard_ignore_users"), "dc_on": bool(logons.settings(db)["dcs"])}
@@ -3806,6 +3807,14 @@ def logonguard_page(request: Request, tab: str = "violations", q: str = "", frm:
         rows = logonguard.unusual(db, start, end, q=q)
         macs = {r.mac for r, _ in rows} | {m for _, u in rows for m in u}
         ctx.update(rows=rows, devs={d.mac: d for d in db.query(Device).filter(Device.mac.in_(macs or {"-"}))})
+    elif tab == "logons":
+        lq = db.query(GuardLogon).filter(GuardLogon.last_ts >= start, GuardLogon.ts < end)
+        if show in logonguard.CATS:
+            lq = lq.filter(GuardLogon.cat == show)
+        if q:
+            lq = lq.filter(GuardLogon.username.ilike(f"%{q}%") | GuardLogon.target.ilike(f"%{q}%")
+                           | GuardLogon.src_name.ilike(f"%{q}%") | GuardLogon.src_ip.ilike(f"%{q}%"))
+        ctx["rows"] = lq.order_by(GuardLogon.last_ts.desc()).limit(2000).all()
     elif tab == "violations":
         vq = db.query(LogonViolation).filter(LogonViolation.last_ts >= start, LogonViolation.ts < end)
         if show == "open":
@@ -3825,7 +3834,8 @@ def logonguard_target(request: Request, tid: int):
     return render(request, "logonguard_target.html", t=t or ProtectedTarget(read_direct=True, action="block",
                                                                             disable_ad=True, lock_user=True,
                                                                             lock_source=True, enabled=True),
-                  actions=logonguard.ACTIONS)
+                  actions=logonguard.ACTIONS, cats=logonguard.CATS, modes_fa=logonguard.MODES,
+                  cur_modes=logonguard.modes(t) if t else {c: "block" for c in logonguard.CATS})
 
 
 @app.post("/guard/target/save")
@@ -3856,6 +3866,8 @@ async def logonguard_target_save(request: Request):
     t.allowed_groups, t.allowed_users = groups[:4000], users[:4000]
     t.allowed_computers = str(form.get("allowed_computers", "")).strip()[:4000]
     t.action = "alarm" if form.get("action") == "alarm" else "block"
+    t.modes = "\n".join(f"{c}={form.get('mode_' + c)}" for c in logonguard.CATS
+                        if form.get("mode_" + c) in logonguard.MODES)
     for k in ("read_direct", "disable_ad", "lock_user", "lock_source", "net_block", "enabled"):
         setattr(t, k, _bool(form, k))
     t.note = str(form.get("note", "")).strip()[:500]

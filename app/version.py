@@ -1,1 +1,1 @@
-VERSION = "1.26.0"     # 2026-11-15: logon guard for protected servers, logons on an unusual computer
+VERSION = "1.26.1"     # 2026-11-16: logon guard per logon type: block or only record; log of every logon to protected servers

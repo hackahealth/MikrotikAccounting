@@ -2,14 +2,15 @@
 {% block content %}
 <style>.vf{display:flex;flex-direction:column;gap:4px;min-width:220px}.vf textarea{font:inherit;font-size:12px}</style>
 <div class="top"><h2>نگهبان ورود به سرورها</h2></div>
-<div class="tabs">{% for k, t in [('violations', 'تخلف‌های ورود'), ('unusual', 'ورود روی رایانهٔ غیرهمیشگی'), ('targets', 'سرورها و تجهیزات حفاظت‌شده')] %}<a href="/guard?tab={{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
+<div class="tabs">{% for k, t in [('violations', 'تخلف‌های ورود'), ('logons', 'ورودها به سرورها'), ('unusual', 'ورود روی رایانهٔ غیرهمیشگی'), ('targets', 'سرورها و تجهیزات حفاظت‌شده')] %}<a href="/guard?tab={{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
 {% if error %}<div class="card"><span class="badge err">خطا</span> <span class="ltr">{{ error }}</span>{% if error_hint %}<p class="hint">{{ error_hint }}</p>{% endif %}</div>{% endif %}
 
-{% if tab in ('violations', 'unusual') %}
+{% if tab in ('violations', 'unusual', 'logons') %}
 <div class="card"><form class="filters" method="get"><input type="hidden" name="tab" value="{{ tab }}">
   <div><label>کاربر / سرور / رایانه</label><input name="q" value="{{ q }}"></div>
   <div><label>از (شمسی)</label><input name="frm" class="ltr" value="{{ frm }}"></div>
   <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ to }}"></div>
+  {% if tab == 'logons' %}<div><label>نوع ورود</label><select name="show"><option value="">همه</option>{% for k, v in cats.items() %}<option value="{{ k }}" {{ 'selected' if show == k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
   {% if tab == 'violations' %}<div><label>وضعیت</label><select name="show"><option value="open">رسیدگی‌نشده</option><option value="all" {{ 'selected' if show == 'all' }}>همه</option></select></div>{% endif %}
   <div><button class="btn p">نمایش</button></div></form></div>
 {% endif %}
@@ -31,6 +32,19 @@
 <label><input type="checkbox" name="release" value="1"> باز کردن قفل‌ها و فعال‌کردن دوبارهٔ حساب AD</label>
 <button class="btn s">بستن تخلف</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">تخلفی نیست</td></tr>{% endfor %}
+</table></div>
+
+{% elif tab == 'logons' %}
+<p class="hint">همهٔ ورودها و تلاش‌های ورود به سرورها و تجهیزات حفاظت‌شده: چه کاربری، از چه رایانه‌ای، با چه نوع ورودی. تکرار همان کاربر از همان مبدأ و همان نوع در یک ساعت یک ردیف است.</p>
+<div class="card tbl"><table>
+<tr><th>از</th><th>تا</th><th>کاربر</th><th>سرور / تجهیز</th><th>نوع ورود</th><th>رایانهٔ مبدأ</th><th>نتیجه</th><th>مجاز</th></tr>
+{% for g in rows %}
+<tr><td>{{ g.ts|jdt }}</td><td>{{ g.last_ts|jdt }}{% if g.count and g.count > 1 %}<div class="hint">{{ g.count|fa }} بار</div>{% endif %}</td>
+<td class="ltr">{{ g.username }}</td><td>{{ g.target }}</td><td>{{ cats.get(g.cat, g.how) }}<div class="hint">{{ g.how }}</div></td>
+<td>{{ g.src_name or '-' }}<div class="hint ltr">{{ g.src_ip }} {% if g.src_mac %}<a href="/devices/{{ g.src_mac }}">{{ g.src_mac }}</a>{% endif %}</div></td>
+<td>{% if g.outcome == 'fail' %}<span class="badge warn">ناموفق</span>{% else %}موفق{% endif %}</td>
+<td>{% if g.allowed %}<span class="badge">مجاز</span>{% else %}<a class="badge err" href="/guard?tab=violations&show=all&q={{ g.username|urlencode }}">تخلف</a>{% endif %}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">موردی پیدا نشد</td></tr>{% endfor %}
 </table></div>
 
 {% elif tab == 'unusual' %}
@@ -56,7 +70,7 @@
 <td class="ltr wrap">{{ t.hosts|replace('\n', '، ') }}<div class="hint">{{ t.addresses|replace('\n', '، ') }}</div></td>
 <td class="ltr wrap">{{ t.allowed_groups|replace('\n', '، ') }}<div class="hint">{{ t.allowed_users|replace('\n', '، ') }}</div></td>
 <td class="ltr wrap">{{ (t.allowed_computers or 'همه')|replace('\n', '، ') }}</td>
-<td>{% if t.action == 'block' %}<span class="badge err">مسدود</span><div class="hint">{{ 'AD ' if t.disable_ad }}{{ 'کاربر ' if t.lock_user }}{{ 'مبدأ ' if t.lock_source }}{{ 'روتر' if t.net_block }}</div>{% else %}<span class="badge warn">هشدار</span>{% endif %}</td>
+<td class="wrap">{% set m = modes_of(t) %}{% for c, label in cats.items() if c in ('network', 'rdp', 'console') or not t.read_direct %}<div class="hint">{{ label.split(' (')[0] }}: {% if m[c] == 'block' %}<b style="color:var(--err,#c00)">بلاک</b>{% else %}ثبت{% endif %}</div>{% endfor %}<div class="hint">{{ 'AD ' if t.disable_ad }}{{ 'کاربر ' if t.lock_user }}{{ 'مبدأ ' if t.lock_source }}{{ 'روتر' if t.net_block }}</div></td>
 <td class="hint wrap">{{ t.status }}</td>
 <td style="white-space:nowrap"><a class="btn s" href="/guard/target/{{ t.id }}">ویرایش</a>
 <form class="inline" method="post" action="/guard/target/{{ t.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form></td></tr>

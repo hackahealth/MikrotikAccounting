@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func, text
 
 from . import config
-from .db import (AcctSession, Alert, AuditLog, AuthLog, Call, DeviceHistory, DeviceTraffic, IfaceDaily, NetEvent,
+from .db import (AcctSession, Alert, AuditLog, AuthLog, Call, DeviceHistory, DeviceTraffic, GuardLogon, IfaceDaily, NetEvent,
                  SpeedSample, TrafficCategory, TrafficDomain, User, engine, get_setting, now)
 
 log = logging.getLogger("retention")
@@ -18,7 +18,8 @@ GROUPS = {
               [(SpeedSample, SpeedSample.ts), (AcctSession, AcctSession.stop_time),
                (TrafficCategory, TrafficCategory.day), (TrafficDomain, TrafficDomain.day)]),
     "routers": ("ترافیک روترها و دستگاه‌ها (روزانه)", [(IfaceDaily, IfaceDaily.day), (DeviceTraffic, DeviceTraffic.day)]),
-    "logs": ("لاگ ورود، رویدادهای شبکه و هشدارها", [(AuthLog, AuthLog.ts), (NetEvent, NetEvent.ts), (Alert, Alert.ts)]),
+    "logs": ("لاگ ورود، رویدادهای شبکه و هشدارها", [(AuthLog, AuthLog.ts), (NetEvent, NetEvent.ts), (Alert, Alert.ts),
+                                                    (GuardLogon, GuardLogon.last_ts)]),
     "devices": ("سابقهٔ IP / کاربر دستگاه‌ها", [(DeviceHistory, DeviceHistory.last_seen)]),
     "calls": ("تماس‌های ایزابل", [(Call, Call.ts)]),
     "audit": ("لاگ فعالیت کاربران پنل", [(AuditLog, AuditLog.ts)]),

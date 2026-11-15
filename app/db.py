@@ -619,7 +619,8 @@ class ProtectedTarget(Base):
     allowed_users = Column(Text, default="")                  # single accounts allowed too (service accounts ...)
     allowed_computers = Column(Text, default="")              # source computers: name, IP, CIDR or range (empty = any)
     read_direct = Column(Boolean, default=True)               # also read 4624/4625 from the server's own Security log
-    action = Column(String(10), default="block")              # block | alarm
+    action = Column(String(10), default="block")              # block | alarm (default for the logon types)
+    modes = Column(Text, default="")                          # per logon type: "rdp=block\nnetwork=log" (logonguard.CATS)
     disable_ad = Column(Boolean, default=True)                # block: disable the account in Active Directory
     lock_user = Column(Boolean, default=True)                 # block: lock the user (hotspot / VPN / proxy)
     lock_source = Column(Boolean, default=True)               # block: lock the source computer (router drops it)
@@ -628,6 +629,27 @@ class ProtectedTarget(Base):
     note = Column(String(500), default="")
     status = Column(String(500), default="")                  # last read of its events
     created_at = Column(DateTime, default=now)
+
+
+class GuardLogon(Base):
+    """Every logon / attempt seen on a protected target (allowed or not): who, from where, how. Repeats of the same
+    user / source / type / outcome within an hour are counted on one row."""
+    __tablename__ = "guard_logons"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)
+    last_ts = Column(DateTime, default=now, index=True)
+    count = Column(Integer, default=1)
+    target_id = Column(Integer, index=True)
+    target = Column(String(150), default="")
+    username = Column(String(150), index=True)
+    cat = Column(String(12), default="")                      # logonguard.CATS
+    how = Column(String(60), default="")
+    outcome = Column(String(10), default="ok")                # ok | fail
+    src_ip = Column(String(45), default="")
+    src_mac = Column(String(17), default="")
+    src_name = Column(String(150), default="")
+    allowed = Column(Boolean, default=True)
+    violation_id = Column(Integer, nullable=True)
 
 
 class LogonViolation(Base):

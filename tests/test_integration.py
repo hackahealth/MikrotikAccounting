@@ -3054,6 +3054,7 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
         ("CN=Admin Two,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "admin2",
                                                 "memberOf": ["CN=Tier1,OU=G,DC=corp,DC=local"]}),
         ("CN=Eve,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "eve", "memberOf": []}),
+        ("CN=Bob,OU=S,DC=corp,DC=local", {**person, "sAMAccountName": "bob", "memberOf": []}),
     ]
     monkeypatch.setattr(ldap_ad, "_connect", lambda c, timeout=30: _mock_ad(entries))
     disabled = []
@@ -3067,22 +3068,30 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
     devices.record(db, "EE:99:00:00:00:02", ip="192.168.88.52", source="arp", ts=ts, hostname="ACC-PC09")
     t = ProtectedTarget(name="سرور مالی", hosts="SRV-FIN", addresses="192.168.1.20", allowed_groups="Srv-Admins",
                         allowed_computers="IT-PC01", read_direct=True, action="block", disable_ad=True,
-                        lock_user=True, lock_source=True, net_block=True, enabled=True)
-    db.add(t)
+                        lock_user=True, lock_source=True, net_block=True, enabled=True,
+                        modes="network=log\nrdp=block")
+    t2 = ProtectedTarget(name="سرور منابع انسانی", hosts="SRV-HR", addresses="192.168.1.30", allowed_groups="Srv-Admins",
+                         allowed_computers="IT-PC01", read_direct=False, action="block", disable_ad=True,
+                         lock_user=True, lock_source=True, enabled=True)
+    db.add_all([t, t2])
     db.commit()
-    tid = t.id
+    tid, tid2 = t.id, t2.id
+    assert logonguard.modes(t)["network"] == "log" and logonguard.modes(t)["ticket"] == "block"
     db.close()
     f = "%Y-%m-%dT%H:%M:%S"
     dc_out = "\n".join([
-        f"{ts:{f}}\t4769\tadmin1@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-FIN$\t\t",       # allowed
-        f"{ts:{f}}\t4769\teve@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-FIN$\t\t",          # not in the group
-        f"{ts:{f}}\t4769\tadmin2@CORP.LOCAL\t::ffff:192.168.88.52\t0x0\tSRV-FIN$\t\t",       # nested ok, wrong PC
+        f"{ts:{f}}\t4769\tadmin1@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-HR$\t\t",        # allowed
+        f"{ts:{f}}\t4769\teve@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-HR$\t\t",           # not in the group
+        f"{ts:{f}}\t4769\tadmin2@CORP.LOCAL\t::ffff:192.168.88.52\t0x0\tSRV-HR$\t\t",        # nested ok, wrong PC
         f"{ts:{f}}\t4769\teve@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tOTHER-SRV$\t\t",        # not protected
+        f"{ts:{f}}\t4769\tbob@CORP.LOCAL\t::ffff:192.168.88.51\t0x0\tSRV-FIN$\t\t",          # FIN: own log read
         f"{ts:{f}}\t4768\teve\t::ffff:192.168.1.20\t0x0\t\t\t",          # server's own log is read instead
     ])
     srv_out = "\n".join([
         f"{ts:{f}}\t4625\teve\t192.168.88.52\t0xc000006d\t\tACC-PC09\t10",     # failed RDP from a wrong PC
         f"{ts:{f}}\t4624\tadmin1\t-\t\t\t-\t2",                                # console, allowed user
+        f"{ts:{f}}\t4624\tadmin1\t192.168.88.51\t\t\tIT-PC01\t3",               # file share, allowed
+        f"{ts:{f}}\t4624\tbob\t192.168.88.51\t\t\tIT-PC01\t3",                  # file share, only logged
         f"{ts:{f}}\t4624\tsvc\t192.168.88.9\t\t\tAPP\t3",                      # the app's own service account
         f"{ts:{f}}\t4624\tSRV-FIN$\t192.168.1.20\t\t\t-\t3",                   # computer account
     ])
@@ -3093,12 +3102,20 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
         return dc_out if 4769 in ids else srv_out
     monkeypatch.setattr(logonguard, "read_events", fake_read)
     logonguard.sync()
-    assert calls[0][0] == "dc1" and "SRV-FIN$" in calls[0][2] and "192.168.1.20" in calls[0][2]
+    assert calls[0][0] == "dc1" and "SRV-HR$" in calls[0][2] and "192.168.1.20" in calls[0][2]
     assert calls[1][0] == "SRV-FIN" and calls[1][1] == (4624, 4625)
     db = SessionLocal()
-    vs = {(v.username, v.outcome, v.src_ip): v for v in db.query(LogonViolation).filter_by(target_id=tid)}
-    assert set(vs) == {("eve", "ok", "192.168.88.51"), ("admin2", "ok", "192.168.88.52"),
-                       ("eve", "fail", "192.168.88.52")}, vs
+    vs = {(v.username, v.outcome, v.src_ip): v for v in db.query(LogonViolation).filter_by(target_id=tid2)}
+    assert set(vs) == {("eve", "ok", "192.168.88.51"), ("admin2", "ok", "192.168.88.52")}, vs
+    fin = {(v.username, v.outcome, v.src_ip): v for v in db.query(LogonViolation).filter_by(target_id=tid)}
+    assert set(fin) == {("eve", "fail", "192.168.88.52"), ("bob", "ok", "192.168.88.51")}, fin
+    assert "حساب AD غیرفعال شد" in fin[("eve", "fail", "192.168.88.52")].actions      # RDP: block
+    assert fin[("bob", "ok", "192.168.88.51")].actions.startswith("فقط ثبت")          # file share: only logged
+    assert not security.locked(db, "bob")
+    from app.db import GuardLogon
+    seen = {(g.username, g.cat, g.allowed) for g in db.query(GuardLogon).filter_by(target_id=tid)}
+    assert {("admin1", "network", True), ("bob", "network", False), ("admin1", "console", True),
+            ("eve", "rdp", False)} <= seen, seen
     v = vs[("eve", "ok", "192.168.88.51")]
     assert "گروه" in v.reasons and "حساب AD غیرفعال شد" in v.actions and "کاربر قفل شد" in v.actions
     assert "رایانهٔ مبدأ" not in v.actions                    # an allowed computer is not locked
@@ -3113,7 +3130,7 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
     SessionLocal().commit()
     logonguard.sync()
     db = SessionLocal()
-    assert db.query(LogonViolation).filter_by(target_id=tid).count() == 3
+    assert db.query(LogonViolation).filter(LogonViolation.target_id.in_((tid, tid2))).count() == 4
     # router: only the allowed computer reaches the server
     plan = access.desired(db, db.query(Nas).first())
     assert plan["lists"][f"macc-p{tid}"] == ["192.168.1.20"]
@@ -3137,7 +3154,16 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
         _login(c, "admin", "Secret12345")
         assert TestClient(app).get("/guard", follow_redirects=False).status_code == 303   # not public
         page = c.get("/guard").text
-        assert "eve" in page and "سرور مالی" in page
+        assert "eve" in page and "سرور منابع انسانی" in page
+        lg = c.get("/guard?tab=logons").text
+        assert "bob" in lg and "IT-PC01" in lg
+        c.post("/guard/target/save", data={"id": str(tid), "name": "سرور مالی", "hosts": "SRV-FIN",
+                                           "allowed_groups": "Srv-Admins", "action": "block", "enabled": "1",
+                                           "mode_network": "block", "mode_rdp": "log"})
+        db = SessionLocal()
+        assert logonguard.modes(db.get(ProtectedTarget, tid))["network"] == "block"
+        assert logonguard.modes(db.get(ProtectedTarget, tid))["rdp"] == "log"
+        db.close()
         assert "ali.u" in c.get("/guard?tab=unusual").text
         assert "SRV-FIN" in c.get("/guard?tab=targets").text
         assert "Srv-Admins" in c.get(f"/guard/target/{tid}").text
