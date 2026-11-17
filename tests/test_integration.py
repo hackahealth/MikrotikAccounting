@@ -3179,3 +3179,89 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
     set_setting(db, "ldap_server", "")
     db.commit()
     db.close()
+
+
+def test_several_users_on_one_device(env, monkeypatch):
+    """Two Windows (AD) users on one computer and two hotspot users on one mobile: one episode each with the users
+    listed separately, editable warning (Windows msg, hotspot status page), SMS, repeat -> device and users locked,
+    exempt devices skipped, panel pages and actions."""
+    from datetime import timedelta
+    from app import devices, logons, security, shareduse
+    from app.db import AcctSession, Lock, SharedUse, User, now, set_setting
+    from app.web import app
+    db = SessionLocal()
+    ts = now()
+    pc, mob = "EE:55:00:00:00:01", "EE:55:00:00:00:02"
+    devices.record(db, pc, ip="192.168.88.71", source="arp", ts=ts, hostname="ACC-PC71")
+    devices.record(db, mob, ip="192.168.88.72", source="arp", ts=ts, hostname="Galaxy-A52")
+    db.add(User(username="sh.one", mobile="09121112233"))
+    db.add(User(username="sh.two", mobile=""))
+    db.flush()
+    logons.record(db, "CORP\\sh.one", ts - timedelta(minutes=5), "dc", ip="192.168.88.71")
+    logons.record(db, "sh.two@corp.local", ts - timedelta(minutes=2), "dc", ip="192.168.88.71")
+    for i, u in enumerate(("hs.a", "hs.b")):
+        db.add(AcctSession(acct_session_id=f"SH{i}", nas_ip="127.0.0.1", username=u, service="hotspot",
+                           framed_ip="192.168.88.72", mac=mob, start_time=ts, last_update=ts, active=True))
+    for k, v in {"share_enabled": "1", "share_msg_enabled": "1", "share_sms_enabled": "1", "share_block_after": "2",
+                 "share_block_what": "both", "share_msg_text": "روی {device} چند کاربر: {users} (بار {count})"}.items():
+        set_setting(db, k, v)
+    db.commit()
+    msgs, sms = [], []
+    new = shareduse.check(db, ts=ts, send=lambda ip, t: msgs.append((ip, t)) or (True, ""),
+                          sms=lambda m, t: sms.append((m, t)) or (True, ""), do_kick=False)
+    mine = {i.mac: i for i in new if i.mac in (pc, mob)}
+    assert set(mine) == {pc, mob}
+    assert shareduse.users_of(mine[pc]) == ["sh.one", "sh.two"] and "ویندوز" in mine[pc].detail
+    assert shareduse.users_of(mine[mob]) == ["hs.a", "hs.b"] and "هات‌اسپات" in mine[mob].detail
+    assert ("192.168.88.71", "اخطار واحد فناوری اطلاعات\n\nروی ACC-PC71 چند کاربر: sh.one، sh.two (بار 1)") in msgs
+    assert "صفحهٔ هات‌اسپات" in mine[mob].msg
+    assert [m for m, _ in sms] == ["09121112233"] and "sh.one" in sms[0][1]
+    assert "sh.two: موبایل ثبت نشده" in mine[pc].sms
+    assert not security.locked(db, "sh.one")
+    # still the same episode on the next round
+    assert [i for i in shareduse.check(db, ts=ts + timedelta(minutes=1), send=lambda ip, t: (True, ""),
+                                       sms=lambda m, t: (True, ""), do_kick=False) if i.mac in (pc, mob)] == []
+    # hotspot status page banner for a user of the mobile
+    hs_user = User(username="hs.a")
+    db.add(hs_user)
+    db.commit()
+    assert "Galaxy-A52" in shareduse.hotspot_warning(db, hs_user)
+    # a later episode on the same computer: second time -> device and both users locked
+    db.query(SharedUse).filter(SharedUse.mac == pc).update({"last_ts": ts - timedelta(hours=3)})
+    db.commit()
+    new = shareduse.check(db, ts=ts + timedelta(minutes=2), send=lambda ip, t: (True, ""),
+                          sms=lambda m, t: (True, ""), do_kick=False)
+    again = [i for i in new if i.mac == pc]
+    assert again and again[0].repeat == 2
+    assert security.locked(db, source=pc) and security.locked(db, "sh.one") and security.locked(db, "sh.two")
+    assert "قفل شد" in again[0].actions
+    # exempt device type: no episode
+    db.query(SharedUse).filter(SharedUse.mac == mob).update({"last_ts": ts - timedelta(hours=3)})
+    db.query(devices.Device).filter_by(mac=mob).update({"device_type": "server"})
+    db.commit()
+    assert [i for i in shareduse.check(db, ts=ts + timedelta(minutes=3), send=lambda ip, t: (True, ""),
+                                       sms=lambda m, t: (True, ""), do_kick=False) if i.mac == mob] == []
+    sid = again[0].id
+    db.close()
+    with TestClient(app) as c:
+        c.post("/login", data={"username": "admin", "password": "Secret12345"})
+        for tab in ("episodes", "repeat", "settings"):
+            r = c.get(f"/shared?tab={tab}")
+            assert r.status_code == 200 and "چند کاربر روی یک دستگاه" in r.text, tab
+        assert "ACC-PC71" in c.get("/shared?show=all").text
+        r = c.post("/shared/settings", data={"share_enabled": "1", "share_window": "45", "share_msg_text": "متن تازه {users}",
+                                             "share_block_what": "users", "share_block_after": "3"},
+                   follow_redirects=False)
+        assert r.status_code == 303
+        db = SessionLocal()
+        st = shareduse.settings(db)
+        assert st["window"] == 45 and st["msg_text"] == "متن تازه {users}" and st["block_what"] == "users"
+        assert not st["msg_enabled"]
+        db.close()
+        r = c.post(f"/shared/{sid}/resolve", data={"note": "تذکر داده شد", "release": "1"}, follow_redirects=False)
+        assert r.status_code == 303
+        db = SessionLocal()
+        assert db.get(SharedUse, sid).resolved_at is not None
+        assert not security.locked(db, "sh.one") and not security.locked(db, source=pc)
+        assert db.query(Lock).filter(Lock.value == "sh.one", Lock.released_by == "admin").count() == 1
+        db.close()

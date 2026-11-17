@@ -675,6 +675,28 @@ class LogonViolation(Base):
     note = Column(Text, default="")
 
 
+class SharedUse(Base):
+    """Several users logged on to the same device (computer or mobile, by MAC) at the same time: Windows logons (AD)
+    and / or hotspot logins (shareduse.py). One row per episode; a new episode on the same device counts as a repeat."""
+    __tablename__ = "shared_use"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)            # first seen
+    last_ts = Column(DateTime, default=now, index=True)
+    mac = Column(String(17), index=True, nullable=False)
+    ip = Column(String(45), default="")
+    device = Column(String(150), default="")                  # label / hostname at that time
+    device_type = Column(String(20), default="")
+    users = Column(String(1000), default="")                  # ",ali,reza," (lower case, for LIKE '%,x,%')
+    detail = Column(String(1000), default="")                 # "ali: ویندوز · reza: هات‌اسپات"
+    repeat = Column(Integer, default=1)                       # episodes of this device in the repeat window
+    msg = Column(String(500), default="")                     # warning message results (Windows / hotspot)
+    sms = Column(String(500), default="")                     # SMS results
+    actions = Column(String(1000), default="")                # blocks done (automatic or by hand)
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String(100), default="")
+    note = Column(Text, default="")
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key = Column(String(100), primary_key=True)
