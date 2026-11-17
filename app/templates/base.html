@@ -56,6 +56,7 @@
   {% endset %}{{ grp('mt', 'روترهای میکروتیک', b) }}
   {% set b %}
   {% if 'alerts_view' in perms %}<a href="/alerts" class="{{ 'on' if p.startswith('/alerts') }}">هشدارها{% if alert_count %} <span class="badge err">{{ alert_count }}</span>{% endif %}</a>{% endif %}
+  {% if 'shared_use' in perms %}<a href="/shared" class="{{ 'on' if p.startswith('/shared') }}">چند کاربر روی یک دستگاه</a>{% endif %}
   {% if 'security_manage' in perms %}<a href="/security" class="{{ 'on' if p.startswith('/security') }}">ورود ناموفق و قفل</a>{% endif %}
   {% if 'logs_view' in perms %}<a href="/logs" data-tour="logs" class="{{ 'on' if p.startswith('/logs') }}">لاگ ورود به اینترنت</a>{% endif %}
   {% if 'audit_view' in perms %}<a href="/audit" data-tour="audit" class="{{ 'on' if p.startswith('/audit') }}">لاگ فعالیت پنل</a>{% endif %}

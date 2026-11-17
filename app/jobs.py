@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import timedelta
 
-from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logonguard, logons, monitor,
+from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logonguard, logons, monitor, shareduse,
                netscope, nightlist, pbx, pingcheck, policy, retention, routeros, security, wancheck)
 from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
@@ -314,5 +314,6 @@ def start():
     _every(60, nightlist.job)
     _every(60, access.job)
     _every(quotamsg.EVERY, quotamsg.job)
+    _every(shareduse.EVERY, shareduse.job)
     threading.Thread(target=pingcheck.job, daemon=True, name="job-pingcheck").start()
     _every(86400, cleanup)

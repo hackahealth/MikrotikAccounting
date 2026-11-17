@@ -1,1 +1,1 @@
-VERSION = "1.26.1"     # 2026-11-16: logon guard per logon type: block or only record; log of every logon to protected servers
+VERSION = "1.28.0"     # 2026-11-17: disconnect without server error, quota users cut at once, SMS password reset (panel + login page), quota SMS

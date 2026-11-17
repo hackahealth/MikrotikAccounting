@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+<style>.vf{display:flex;flex-direction:column;gap:4px;min-width:200px}.vf textarea{font:inherit;font-size:12px}.ul{margin:0;padding:0;list-style:none}</style>
+<div class="top"><h2>چند کاربر روی یک دستگاه</h2></div>
+<div class="tabs">{% for k, t in [('episodes', 'موارد ثبت‌شده'), ('repeat', 'تکرارها'), ('settings', 'تنظیمات و متن پیام')] %}<a href="/shared?tab={{ k }}" class="{{ 'on' if tab == k }}">{{ t }}</a>{% endfor %}</div>
+{% if not st.enabled %}<div class="card"><span class="badge warn">خاموش</span> بررسی خودکار خاموش است؛ از زبانهٔ «تنظیمات» روشن کنید.</div>{% endif %}
+
+{% if tab == 'episodes' %}
+<div class="card"><form class="filters" method="get"><input type="hidden" name="tab" value="episodes">
+  <div><label>کاربر / دستگاه / IP / MAC</label><input name="q" value="{{ q }}"></div>
+  <div><label>از (شمسی)</label><input name="frm" class="ltr" value="{{ frm }}"></div>
+  <div><label>تا (شمسی)</label><input name="to" class="ltr" value="{{ to }}"></div>
+  <div><label>وضعیت</label><select name="show"><option value="open">رسیدگی‌نشده</option><option value="all" {{ 'selected' if show == 'all' }}>همه</option></select></div>
+  <div><button class="btn p">نمایش</button></div></form></div>
+<p class="hint">رایانه یا موبایلی (بر اساس MAC) که هم‌زمان بیش از یک کاربر روی آن وارد شده‌اند: ورود ویندوز (AD) در {{ st.window|fa }} دقیقهٔ اخیر و / یا ورود هات‌اسپاتِ فعال. هر ردیف یک بار وقوع است و ستون «بار» تعداد وقوع روی همان دستگاه در {{ st.repeat_days|fa }} روز اخیر را نشان می‌دهد. رسیدگی‌نشده: {{ n_open|fa }}</p>
+<div class="card tbl"><table>
+<tr><th>زمان</th><th>دستگاه</th><th>کاربران (هر کدام جدا)</th><th>بار</th><th>پیام / پیامک</th><th>مسدودی</th><th>اقدام</th></tr>
+{% for r in rows %}{% set us = users_of(r) %}
+<tr><td>{{ r.ts|jdt }}<div class="hint">تا {{ r.last_ts|jdt }}</div></td>
+<td><a href="/devices/{{ r.mac }}">{{ r.device or r.mac }}</a><div class="hint ltr">{{ r.ip }} {{ r.mac }}</div><div class="hint">{{ r.device_type }}</div>
+{% if ('mac', r.mac|lower) in locks %}<span class="badge err">قفل</span>{% endif %}</td>
+<td><ul class="ul">{% for part in r.detail.split(' · ') %}{% set u = part.split(':')[0] %}<li><a class="ltr" href="/winlogons?q={{ u|urlencode }}">{{ u }}</a> <span class="hint">{{ part.split(':', 1)[1] if ':' in part else '' }}</span>{% if ('user', u|lower) in locks %} <span class="badge err">قفل</span>{% endif %}</li>{% endfor %}
+{% for u in us %}{% if (u ~ ':') not in (r.detail|lower) %}<li class="ltr">{{ u }}</li>{% endif %}{% endfor %}</ul></td>
+<td>{% if r.repeat and r.repeat > 1 %}<span class="badge {{ 'err' if st.block_after and r.repeat >= st.block_after else 'warn' }}">{{ r.repeat|fa }}</span>{% else %}۱{% endif %}</td>
+<td class="wrap hint">{{ r.msg }}{% if r.sms %}<div>پیامک: {{ r.sms }}</div>{% endif %}</td>
+<td class="wrap hint">{{ r.actions }}</td>
+<td>{% if r.resolved_at %}<span class="badge">بسته شد</span> {{ r.resolved_at|jdt }} {{ r.resolved_by }}{% if r.note %}<div class="hint" style="white-space:pre-line">{{ r.note }}</div>{% endif %}
+{% else %}<div class="vf">
+<form class="inline" method="post" action="/shared/{{ r.id }}/msg"><input type="hidden" name="back" value="/shared?show={{ show }}"><button class="btn s">ارسال پیام اخطار</button></form>
+{% if sms_ok %}<form class="inline" method="post" action="/shared/{{ r.id }}/sms"><input type="hidden" name="back" value="/shared?show={{ show }}"><button class="btn s">ارسال پیامک</button></form>{% endif %}
+<details><summary class="btn s d">مسدود کردن…</summary>
+<form method="post" action="/shared/{{ r.id }}/block" class="vf" onsubmit="return confirm('مسدود شود؟')"><input type="hidden" name="back" value="/shared?show={{ show }}">
+<label><input type="radio" name="what" value="device" checked> دستگاه (MAC) — اگر کاربری هم تیک بخورد، هر دو</label>
+<label><input type="radio" name="what" value="users"> فقط کاربران تیک‌خورده</label>
+{% for u in us %}<label class="ltr"><input type="checkbox" name="user" value="{{ u }}"> {{ u }}</label>{% endfor %}
+<label>مدت (دقیقه، خالی = تا باز کردن دستی) <input name="minutes" class="ltr" size="5"></label>
+<label><input type="checkbox" name="block_ad" value="1"> حساب AD کاربران هم غیرفعال شود</label>
+<button class="btn s d">مسدود کن</button></form></details>
+<form method="post" action="/shared/{{ r.id }}/resolve" class="vf"><input type="hidden" name="back" value="/shared?show={{ show }}">
+<textarea name="note" rows="2" placeholder="شرح رسیدگی (اختیاری)"></textarea>
+<label><input type="checkbox" name="release" value="1"> باز کردن قفل‌های همین مورد</label>
+<button class="btn s">بستن</button></form></div>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">موردی پیدا نشد</td></tr>{% endfor %}
+</table></div>
+
+{% elif tab == 'repeat' %}
+<p class="hint">تعداد دفعات در {{ st.repeat_days|fa }} روز اخیر.{% if st.block_after and st.block_what != 'none' %} مسدودی خودکار ({{ block_what[st.block_what] }}) از بار {{ st.block_after|fa }}.{% endif %}</p>
+<div class="grid g2">
+<div class="card tbl"><h3>دستگاه‌ها</h3><table><tr><th>دستگاه</th><th>بار</th><th>آخرین</th><th>کاربران</th></tr>
+{% for d in by_dev %}<tr><td><a href="/devices/{{ d.mac }}">{{ d.device or d.mac }}</a><div class="hint ltr">{{ d.mac }}</div></td><td>{{ d.n|fa }}</td><td>{{ d.last|jdt }}</td><td class="ltr wrap">{{ d.users|sort|join(', ') }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">موردی نیست</td></tr>{% endfor %}</table></div>
+<div class="card tbl"><h3>کاربران</h3><table><tr><th>کاربر</th><th>بار</th><th>آخرین</th><th>دستگاه‌ها</th></tr>
+{% for u in by_user %}<tr><td class="ltr"><a href="/shared?show=all&q={{ u.user|urlencode }}">{{ u.user }}</a></td><td>{{ u.n|fa }}</td><td>{{ u.last|jdt }}</td><td class="wrap">{{ u.devices|sort|join('، ') }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">موردی نیست</td></tr>{% endfor %}</table></div>
+</div>
+
+{% else %}
+<form method="post" action="/shared/settings">
+<div class="card"><h3>تشخیص</h3>
+<label><input type="checkbox" name="share_enabled" value="1" {{ 'checked' if st.enabled }}> بررسی خودکار (هر دقیقه)</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>بازهٔ ورود ویندوز (دقیقه)</label><input name="share_window" class="ltr" value="{{ st.window }}"><span class="hint">ورودهای AD که در این بازه روی یک رایانه دیده شده‌اند هم‌زمان حساب می‌شوند.</span></div>
+  <div class="fg"><label>کاربرانی که شمرده نمی‌شوند</label><textarea name="share_ignore_users" rows="3" class="ltr" placeholder="administrator&#10;svc-backup">{{ st.ignore_users }}</textarea><span class="hint">حساب سرویس AD خودکار نادیده گرفته می‌شود.</span></div>
+  <div class="fg"><label>دستگاه‌های مستثنا</label><textarea name="share_exempt" rows="3" class="ltr" placeholder="MAC / IP / CIDR / نام رایانه">{{ st.exempt }}</textarea><span class="hint">مثل سرورهای RDP یا رایانهٔ مشترک شیفت.</span></div>
+  <div class="fg"><label>نوع دستگاه‌های مستثنا</label><input name="share_exempt_types" class="ltr" value="{{ st.exempt_types }}"><span class="hint">مثلاً server thin</span></div>
+</div></div>
+
+<div class="card"><h3>پیام اخطار</h3>
+<label><input type="checkbox" name="share_msg_enabled" value="1" {{ 'checked' if st.msg_enabled }}> با هر وقوع، خودکار پیام اخطار فرستاده شود</label>
+{% if not msg_ok %}<div class="hint">پیام ویندوز (msg.exe) فقط وقتی برنامه روی سرور ویندوز است کار می‌کند؛ پیش‌نیازها در صفحهٔ «پیام به رایانه‌ها».</div>{% endif %}
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>عنوان</label><input name="share_msg_title" value="{{ st.msg_title }}"></div>
+  <div class="fg"><label>مدت نمایش روی رایانه (ثانیه)</label><input name="share_msg_seconds" class="ltr" value="{{ st.msg_seconds }}"></div>
+</div>
+<div class="fg"><label>متن پیام</label><textarea name="share_msg_text" rows="5">{{ st.msg_text }}</textarea></div>
+<p class="hint">جای‌گذاری: <span class="ltr">{users}</span> کاربران، <span class="ltr">{device}</span> نام دستگاه، <span class="ltr">{ip}</span>، <span class="ltr">{mac}</span>، <span class="ltr">{count}</span> چندمین بار، <span class="ltr">{days}</span> بازهٔ تکرار، <span class="ltr">{time}</span> ساعت. برای برگشت به متن پیش‌فرض، کادر را خالی کنید.<br>
+روی رایانه با msg.exe به IP دستگاه باز می‌شود؛ روی موبایل و هر دستگاه هات‌اسپات، همین متن بالای صفحهٔ وضعیت هات‌اسپات (warn.js) نمایش داده می‌شود.</p>
+</div>
+
+<div class="card"><h3>پیامک</h3>
+{% if not sms_installed %}<div class="hint">ماژول پیامک هنوز نصب نیست؛ بعد از نصب و تنظیم ارسال‌کنندهٔ پیامک، این گزینه کار می‌کند.</div>
+{% elif not sms_ok %}<div class="hint">ارسال‌کنندهٔ پیامک تنظیم یا روشن نشده است.</div>{% endif %}
+<label><input type="checkbox" name="share_sms_enabled" value="1" {{ 'checked' if st.sms_enabled }}> با هر وقوع، به موبایل همهٔ کاربران آن دستگاه پیامک برود (موبایل از AD / فرم کاربر)</label>
+<div class="fg" style="margin-top:8px"><label>متن پیامک</label><textarea name="share_sms_text" rows="3">{{ st.sms_text }}</textarea></div>
+</div>
+
+<div class="card"><h3>مسدودی در صورت تکرار</h3>
+<div class="grid g3">
+  <div class="fg"><label>بازهٔ شمارش تکرار (روز)</label><input name="share_repeat_days" class="ltr" value="{{ st.repeat_days }}"></div>
+  <div class="fg"><label>مسدودی خودکار از بار (۰ = هرگز)</label><input name="share_block_after" class="ltr" value="{{ st.block_after }}"></div>
+  <div class="fg"><label>چه چیزی مسدود شود</label><select name="share_block_what">{% for k, v in block_what.items() %}<option value="{{ k }}" {{ 'selected' if st.block_what == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>مدت مسدودی (دقیقه، ۰ = تا باز کردن دستی)</label><input name="share_block_minutes" class="ltr" value="{{ st.block_minutes }}"></div>
+</div>
+<label><input type="checkbox" name="share_kick" value="1" {{ 'checked' if st.kick }}> اتصال هات‌اسپات فعالِ دستگاه / کاربرانِ مسدودشده همان لحظه قطع شود</label><br>
+<label><input type="checkbox" name="share_block_ad" value="1" {{ 'checked' if st.block_ad }}> حساب AD کاربرانِ مسدودشده هم غیرفعال شود</label>
+<p class="hint">کاربر وقتی مسدود می‌شود که خودش به این تعداد رسیده باشد و دستگاه وقتی که روی همان دستگاه به این تعداد رسیده باشد. قفل‌ها در صفحهٔ «ورود ناموفق و قفل» هم دیده و باز می‌شوند و MAC قفل‌شده را روتر هم drop می‌کند.</p>
+</div>
+<button class="btn p">ذخیره</button> <button class="btn" name="run" value="1">ذخیره و بررسی همین الان</button>
+</form>
+{% endif %}
+{% endblock %}
