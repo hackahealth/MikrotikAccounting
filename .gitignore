@@ -1,5 +1,5 @@
 # runtime data: database, encryption key, logs, uploaded hotspot packages
-data/
+/data/
 runtime/
 __pycache__/
 *.pyc

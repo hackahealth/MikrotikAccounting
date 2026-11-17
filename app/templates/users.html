@@ -71,6 +71,8 @@
     <form class="inline" method="post" action="/users/{{ u.id }}/toggle"><button class="btn s">{{ 'غیرفعال' if u.enabled else 'فعال' }}</button></form>
     <form class="inline" method="post" action="/users/{{ u.id }}/reset" onsubmit="return confirm('مصرف این کاربر صفر شود؟')"><button class="btn s">صفر کردن مصرف</button></form>
     <form class="inline" method="post" action="/users/{{ u.id }}/delete" onsubmit="return confirm('حذف شود؟')"><button class="btn s d">حذف</button></form>
+  {% endif %}{% if 'pw_reset_sms' in perms and u.source in ('ldap', 'local') %}
+    <form class="inline" method="post" action="/users/{{ u.id }}/sms-reset" onsubmit="return confirm('رمز {{ u.username }} ریست و رمز جدید به موبایلش پیامک شود؟')"><input type="hidden" name="back" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query }}"><button class="btn s" title="رمز تصادفی جدید روی AD و ارسال آن با نام کاربری به موبایل کاربر">ریست رمز با پیامک</button></form>
   {% endif %}</td>
 </tr>
 {% else %}<tr><td colspan="13" class="muted">کاربری یافت نشد</td></tr>{% endfor %}

@@ -154,6 +154,8 @@ class User(Base):
     usage_reset_at = Column(DateTime, nullable=True)      # manual quota reset point
     quota_msg_level = Column(String(10), default="")      # automatic quota message sent: warn | err
     quota_msg_at = Column(DateTime, nullable=True)
+    quota_sms_level = Column(String(10), default="")      # quota SMS sent: warn | err (app/quotamsg.sms_check)
+    quota_sms_at = Column(DateTime, nullable=True)
 
 
 class Nas(Base):
@@ -673,6 +675,32 @@ class LogonViolation(Base):
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(String(100), default="")
     note = Column(Text, default="")
+
+
+class SmsLog(Base):
+    """Every SMS the system tried to send (codes / passwords are masked)."""
+    __tablename__ = "sms_log"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)
+    mobile = Column(String(20), default="")
+    username = Column(String(150), default="")
+    purpose = Column(String(20), default="")                  # test | reset_admin | reset_otp | reset_done | quota ...
+    text = Column(String(500), default="")
+    ok = Column(Boolean, default=False)
+    error = Column(String(300), default="")
+
+
+class ResetCode(Base):
+    """One-time SMS code of the self-service password reset (/forgot)."""
+    __tablename__ = "reset_codes"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)
+    mobile = Column(String(20), index=True)
+    code_hash = Column(String(128), default="")
+    expires_at = Column(DateTime)
+    tries = Column(Integer, default=0)
+    used = Column(Boolean, default=False)
+    ip = Column(String(45), default="")
 
 
 class Setting(Base):

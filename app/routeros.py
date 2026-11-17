@@ -185,52 +185,78 @@ def network_info(nas: Nas):
     return {"interfaces": out_ifaces, "wan": wan, "lan": lan, "lan_ifaces": lan_ifaces}
 
 
-def disconnect_api(nas: Nas, username: str, service: str = "") -> int:
+def disconnect_api(nas: Nas, username: str, service: str = "", cookies: bool = True) -> int:
+    """Removes every hotspot / PPP login of this user on the router (user name compared without case) and, for
+    hotspot, its login cookies so the device cannot log straight back in with the cookie."""
     conn = api(nas)
     removed = 0
+    name = str(username or "").strip().lower()
+    if not name:
+        return 0
     try:
         paths = [("ip", "hotspot", "active"), ("ppp", "active")]
         if service == "vpn":
             paths = paths[::-1]
         for p in paths:
             path = conn.path(*p)
-            for item in rows(path):
-                if item.get("user", item.get("name")) == username:
-                    path.remove(item[".id"])
-                    removed += 1
+            for item in _list(conn, *p):
+                if str(item.get("user", item.get("name")) or "").strip().lower() == name and item.get(".id"):
+                    try:
+                        path.remove(item[".id"])
+                        removed += 1
+                    except Exception as e:      # noqa: BLE001  (already gone)
+                        log.debug("remove %s %s: %s", p, item.get(".id"), e)
+        if cookies and service != "vpn":
+            path = conn.path("ip", "hotspot", "cookie")
+            for item in _list(conn, "ip", "hotspot", "cookie"):
+                if str(item.get("user") or "").strip().lower() == name and item.get(".id"):
+                    try:
+                        path.remove(item[".id"])
+                    except Exception as e:      # noqa: BLE001
+                        log.debug("cookie remove %s: %s", item.get(".id"), e)
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:       # noqa: BLE001
+            pass
     return removed
 
 
 def disconnect_coa(nas: Nas, username: str, acct_session_id: str = "", framed_ip: str = "") -> bool:
     target = nas.ip if nas.ip and nas.ip != "0.0.0.0" else nas.api_host
-    if not target:
+    if not target or not nas.secret:
         return False
-    cl = Client(server=target, secret=nas.secret.encode(), dict=_dictionary(), coaport=nas.coa_port or 3799)
-    cl.timeout, cl.retries = 3, 1
-    req = cl.CreateCoAPacket(code=packet.DisconnectRequest, User_Name=username)
-    if acct_session_id:
-        req["Acct-Session-Id"] = acct_session_id
-    if framed_ip:
-        req["Framed-IP-Address"] = framed_ip
     try:
+        cl = Client(server=target, secret=str(nas.secret).encode(), dict=_dictionary(), coaport=nas.coa_port or 3799)
+        cl.timeout, cl.retries = 3, 1
+        req = cl.CreateCoAPacket(code=packet.DisconnectRequest, User_Name=username)
+        if acct_session_id:
+            req["Acct-Session-Id"] = acct_session_id
+        if framed_ip:
+            req["Framed-IP-Address"] = framed_ip
         reply = cl.SendPacket(req)
         return reply.code == packet.DisconnectACK
-    except (socket.error, Exception) as e:
+    except Exception as e:      # noqa: BLE001  timeout, bad address, router does not accept CoA ...
         log.warning("CoA to %s failed: %s", target, e)
         return False
 
 
 def disconnect(nas: Nas, username: str, service="", acct_session_id="", framed_ip="") -> bool:
-    """Try RADIUS Disconnect-Request first (only for RADIUS sessions), then RouterOS API."""
-    if not acct_session_id.startswith("api:") and disconnect_coa(nas, username, acct_session_id, framed_ip):
-        return True
+    """Cut a user's login on a router. Never raises.
+    With the router API: removes every hotspot / PPP login of the user (and hotspot cookies) at once. Otherwise, or
+    when the API found nothing, RADIUS Disconnect-Request (CoA; needs /radius incoming accept=yes) for RADIUS
+    sessions."""
+    acct_session_id = str(acct_session_id or "")
+    if nas is None:
+        return False
     if nas.api_user:
         try:
-            return disconnect_api(nas, username, service) > 0
-        except Exception as e:
-            log.warning("API disconnect failed: %s", e)
+            if disconnect_api(nas, username, service) > 0:
+                return True
+        except Exception as e:      # noqa: BLE001
+            log.warning("API disconnect of %s on %s failed: %s", username, nas.name, e)
+    if not acct_session_id.startswith("api:"):
+        return disconnect_coa(nas, username, acct_session_id, framed_ip or "")
     return False
 
 

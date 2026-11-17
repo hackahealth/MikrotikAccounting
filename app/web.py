@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logonguard, logons, monitor, nightlist, pbx,
-               jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
+               jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, sms, pwreset, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
                  ExtensionAssignment, Group, GuardLogon, LogonViolation, NightList, PbxServer, ProtectedTarget,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
@@ -95,7 +95,7 @@ b{direction:ltr;display:inline-block}</style></head><body><div><h1>دسترسی 
 
 
 # ------------------------------------------------------------------ helpers / auth
-PUBLIC = ("/login", "/static", "/ua", "/healthz", "/my", "/logon", "/hs/")
+PUBLIC = ("/login", "/static", "/ua", "/healthz", "/my", "/logon", "/hs/", "/forgot")
 
 
 @app.middleware("http")
@@ -238,7 +238,7 @@ def healthz():
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return render(request, "login.html")
+    return render(request, "login.html", forgot=_forgot_on(SessionLocal()))
 
 
 @app.post("/login")
@@ -1434,15 +1434,35 @@ def _nas_for_ip(db, ip):
 @app.post("/live/{sid}/disconnect")
 def live_disconnect(request: Request, sid: int):
     db = SessionLocal()
-    s = db.get(AcctSession, sid)
-    nas = _nas_for_ip(db, s.nas_ip) if s else None
-    if s and nas and routeros.disconnect(nas, s.username, s.service, s.acct_session_id, s.framed_ip):
-        s.terminate_cause = "Admin-Reset"
-        db.commit()
-        log_action(request, "قطع اتصال کاربر", s.username)
-        flash(request, f"اتصال {s.username} قطع شد")
-    else:
-        flash(request, "قطع اتصال ناموفق بود (CoA یا API روتر را بررسی کنید)", "err")
+    try:
+        s = db.get(AcctSession, sid)
+        if s is None:
+            flash(request, "این اتصال دیگر وجود ندارد", "err")
+            return redirect("/live")
+        username, service, asid, fip, uid = s.username, s.service, s.acct_session_id or "", s.framed_ip or "", s.user_id
+        if service == "proxy":
+            from . import proxy as proxy_mod
+            proxy_mod.server.kick(uid, "admin")
+            ok = True
+        else:
+            nas = _nas_for_ip(db, s.nas_ip)
+            db.commit()             # no open transaction while talking to the router (other writers would wait)
+            ok = nas is not None and routeros.disconnect(nas, username, service, asid, fip)
+        if ok:
+            s = db.get(AcctSession, sid)
+            if s is not None:
+                s.terminate_cause = "Admin-Reset"
+                if s.active:
+                    s.active, s.stop_time = False, now()
+            db.commit()
+            log_action(request, "قطع اتصال کاربر", username)
+            flash(request, f"اتصال {username} قطع شد")
+        else:
+            flash(request, "قطع اتصال ناموفق بود: API روتر (یا CoA با /radius incoming accept=yes) را بررسی کنید", "err")
+    except Exception as e:      # noqa: BLE001  never an Internal Server Error for this button
+        db.rollback()
+        logging.getLogger("web").exception("disconnect %s failed", sid)
+        flash(request, f"قطع اتصال ناموفق: {e}", "err")
     return redirect("/live")
 
 
@@ -2965,7 +2985,7 @@ def my_page(request: Request):
     try:
         u = _my_user(request, db)
         if u is None:
-            return render(request, "my_login.html")
+            return render(request, "my_login.html", forgot=_forgot_on(db))
         return render(request, "my.html", my_tour=tour.my_steps(u), my_tour_auto=(u.tour_seen or "") != tour.VERSION,
                       **_my_context(db, u))
     finally:
@@ -3991,6 +4011,104 @@ async def messages_send(request: Request):
         request.session["msg_result"] = [[r[0], r[1], bool(r[2]), r[3]] for r in res][:200]
         flash(request, f"پیام به {len(ok)} رایانه رسید" + (f"؛ {len(bad)} ناموفق" if bad else ""), "ok" if ok else "err")
     return redirect("/messages")
+
+
+# ------------------------------------------------------------------ SMS: settings, password reset, quota SMS
+SMS_PURPOSES = {"test": "آزمایشی", "reset_admin": "ریست رمز (پنل)", "reset_otp": "کد تایید", "reset_done": "رمز تغییر کرد",
+                "quota": "هشدار حجم"}
+
+
+def _forgot_on(db) -> bool:
+    try:
+        return get_setting(db, "sms_reset_self", "1") == "1" and sms.enabled(db)
+    except Exception:       # noqa: BLE001
+        return False
+
+
+@app.get("/sms", response_class=HTMLResponse)
+def sms_page(request: Request):
+    db = SessionLocal()
+    return render(request, "sms.html", st=sms.settings(db), providers=sms.PROVIDERS, ready=sms.enabled(db),
+                  log=sms.recent(db, 150), purposes=SMS_PURPOSES, warn_pct=policy.warn_pct(db))
+
+
+@app.post("/sms/save")
+async def sms_save(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    sms.save_settings(db, form)
+    db.commit()
+    log_action(request, "تنظیم پیامک", f"{form.get('sms_provider')} {'روشن' if form.get('sms_enabled') else 'خاموش'}")
+    flash(request, "ذخیره شد")
+    return redirect("/sms")
+
+
+@app.post("/sms/test")
+async def sms_test(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    ok, err = await run_in_threadpool(sms.send, db, str(form.get("mobile", "")), str(form.get("text", "") or "پیامک آزمایشی")[:300], "test")
+    log_action(request, "پیامک آزمایشی", f"{sms.mask(form.get('mobile', ''))}: {'موفق' if ok else err}")
+    flash(request, "پیامک ارسال شد" if ok else f"ارسال ناموفق: {err}", "ok" if ok else "err")
+    return redirect("/sms")
+
+
+@app.post("/users/{uid}/sms-reset")
+async def user_sms_reset(request: Request, uid: int):
+    form = await request.form()
+    db = SessionLocal()
+    u = db.get(User, uid)
+    back = _local(form.get("back"), "/users")
+    if u is None or not scope.in_scope(request.state.me, u):
+        flash(request, "کاربر پیدا نشد", "err")
+        return redirect(back)
+    if get_setting(db, "sms_reset_admin", "1") != "1":
+        flash(request, "ریست رمز با پیامک در صفحهٔ «پیامک» خاموش است", "err")
+        return redirect(back)
+    me = request.state.me
+    ok, msg = await run_in_threadpool(pwreset.admin_reset, db, u, bool(form.get("must_change")), me.username if me else "")
+    flash(request, msg, "ok" if ok else "err")
+    return redirect(back)
+
+
+@app.get("/forgot", response_class=HTMLResponse)
+def forgot_page(request: Request):
+    db = SessionLocal()
+    if not _forgot_on(db):
+        flash(request, "بازیابی رمز با پیامک فعال نیست؛ با واحد IT تماس بگیرید", "err")
+    return render(request, "forgot.html", step="mobile")
+
+
+@app.post("/forgot/send", response_class=HTMLResponse)
+async def forgot_send(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    ip = request.client.host if request.client else ""
+    ok, msg, mobile = await run_in_threadpool(pwreset.request_code, db, str(form.get("mobile", "")), ip)
+    if not ok:
+        return render(request, "forgot.html", step="mobile", flash={"msg": msg, "kind": "err"})
+    multi = len(pwreset.users_for_mobile(db, mobile)) > 1
+    return render(request, "forgot.html", step="code", mobile=mobile, masked=sms.mask(mobile), multi=multi,
+                  flash={"msg": msg, "kind": "ok"})
+
+
+@app.post("/forgot/reset", response_class=HTMLResponse)
+async def forgot_reset(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    ip = request.client.host if request.client else ""
+    mobile = sms.normalize_mobile(form.get("mobile", ""))
+    pw, pw2 = str(form.get("password", "")), str(form.get("password2", ""))
+    multi = len(pwreset.users_for_mobile(db, mobile)) > 1 if mobile else False
+    if pw != pw2:
+        ok, msg = False, "رمز و تکرار آن یکی نیستند"
+    else:
+        ok, msg = await run_in_threadpool(pwreset.reset_with_code, db, mobile, str(form.get("code", "")),
+                                          str(form.get("username", "")), pw, ip)
+    if ok:
+        return render(request, "forgot.html", step="done", flash={"msg": msg, "kind": "ok"})
+    return render(request, "forgot.html", step="code", mobile=mobile, masked=sms.mask(mobile), multi=multi,
+                  flash={"msg": msg, "kind": "err"})
 
 
 # ------------------------------------------------------------------ Active Directory administration (internal only)

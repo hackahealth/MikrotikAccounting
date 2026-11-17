@@ -40,6 +40,7 @@
   {% if 'devices_view' in perms %}<a href="/winlogons" class="{{ 'on' if p.startswith('/winlogons') }}">ورود کاربران ویندوز</a>{% endif %}
   {% if 'logon_guard' in perms %}<a href="/guard" class="{{ 'on' if p.startswith('/guard') }}">نگهبان ورود به سرورها</a>{% endif %}
   {% if 'ad_message' in perms %}<a href="/messages" class="{{ 'on' if p.startswith('/messages') }}">پیام به رایانه‌ها</a>{% endif %}
+  {% if 'sms_manage' in perms %}<a href="/sms" class="{{ 'on' if p.startswith('/sms') }}">پیامک</a>{% endif %}
   {% endset %}{{ grp('ad', 'Active Directory و ویندوز', b) }}
   {% set b %}
   {% if 'devices_view' in perms %}<a href="/devices" data-tour="devices" class="{{ 'on' if p.startswith('/devices') and not p.startswith('/devices/night') }}">دستگاه‌ها</a>
