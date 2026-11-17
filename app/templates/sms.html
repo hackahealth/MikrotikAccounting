@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top"><h2>پیامک</h2></div>
+{% if not ready %}<div class="flash warn">ارسال پیامک هنوز فعال یا کامل تنظیم نشده است.</div>{% endif %}
+<div class="card"><h3>سامانهٔ پیامکی</h3>
+<form method="post" action="/sms/save">
+<label><input type="checkbox" name="sms_enabled" value="1" {{ 'checked' if st.sms_enabled == '1' }}> ارسال پیامک فعال باشد</label>
+<div class="grid g3" style="margin-top:8px">
+  <div class="fg"><label>سرویس‌دهنده</label><select name="sms_provider" onchange="document.querySelectorAll('[data-p]').forEach(e=>e.style.display=e.dataset.p.split(' ').includes(this.value)?'':'none')">
+    {% for k, v in providers.items() %}<option value="{{ k }}" {{ 'selected' if st.sms_provider == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="fg"><label>عنوان ابتدای هر پیامک</label><input name="sms_title" value="{{ st.sms_title }}"></div>
+  <div class="fg"><label>شمارهٔ خط ارسال (Sender)</label><input name="sms_sender" class="ltr" value="{{ st.sms_sender }}" placeholder="10008663"></div>
+  <div class="fg" data-p="kavenegar smsir ippanel http"><label>کلید API {% if st.api_key %}<span class="hint">(ثبت شده؛ خالی = بدون تغییر)</span>{% endif %}</label><input name="sms_api_key" class="ltr" type="password" autocomplete="new-password"></div>
+  <div class="fg" data-p="melipayamak http"><label>نام کاربری پنل پیامک</label><input name="sms_username" class="ltr" value="{{ st.sms_username }}"></div>
+  <div class="fg" data-p="melipayamak http"><label>رمز پنل پیامک {% if st.password %}<span class="hint">(ثبت شده)</span>{% endif %}</label><input name="sms_password" class="ltr" type="password" autocomplete="new-password"></div>
+</div>
+<div data-p="http">
+  <div class="grid g3">
+    <div class="fg" style="grid-column:span 2"><label>آدرس وب‌سرویس</label><input name="sms_http_url" class="ltr" value="{{ st.sms_http_url }}" placeholder="https://example.ir/send?key={key}&to={to}&from={sender}&text={text}"></div>
+    <div class="fg"><label>روش</label><select name="sms_http_method"><option {{ 'selected' if st.sms_http_method == 'GET' }}>GET</option><option {{ 'selected' if st.sms_http_method == 'POST' }}>POST</option></select></div>
+  </div>
+  <div class="fg"><label>بدنهٔ POST (JSON یا فرم؛ خالی برای GET)</label><textarea name="sms_http_body" rows="3" class="ltr">{{ st.sms_http_body }}</textarea></div>
+  <div class="fg"><label>نشانهٔ موفقیت در پاسخ (خالی = هر پاسخ 2xx)</label><input name="sms_http_ok" class="ltr" value="{{ st.sms_http_ok }}"></div>
+  <p class="hint">جایگزین‌ها: <span class="ltr">{to} {text} {sender} {key} {username} {password}</span></p>
+</div>
+<h3>کاربردها</h3>
+<div><label><input type="checkbox" name="sms_reset_admin" value="1" {{ 'checked' if st.sms_reset_admin == '1' }}> ریست رمز کاربر از پنل و ارسال رمز جدید با پیامک</label></div>
+<div><label><input type="checkbox" name="sms_reset_self" value="1" {{ 'checked' if st.sms_reset_self == '1' }}> «فراموشی رمز» در صفحهٔ ورود: کد تایید پیامکی و تعیین رمز جدید AD توسط خود کاربر</label></div>
+<div><label><input type="checkbox" name="sms_quota_enabled" value="1" {{ 'checked' if st.sms_quota_enabled == '1' }}> پیامک هشدار وقتی مصرف کاربر به {{ warn_pct }}٪ حجم رسید</label>
+  <label style="margin-inline-start:16px"><input type="checkbox" name="sms_quota_exhausted" value="1" {{ 'checked' if st.sms_quota_exhausted == '1' }}> و وقتی حجم تمام شد</label></div>
+<p class="hint">درصد هشدار همان «حد هشدار» صفحهٔ پیام به رایانه‌هاست. هر پیامک یک بار در هر دورهٔ حجم می‌رود. شمارهٔ موبایل از فیلد Mobile کاربر در AD خوانده می‌شود.</p>
+<button class="btn p">ذخیره</button>
+</form>
+<script>document.querySelector('[name=sms_provider]').dispatchEvent(new Event('change'))</script>
+</div>
+<div class="card"><h3>پیامک آزمایشی</h3>
+<form method="post" action="/sms/test" class="filters">
+  <div><label>موبایل</label><input name="mobile" class="ltr" placeholder="09121234567"></div>
+  <div style="flex:1"><label>متن</label><input name="text" value="پیامک آزمایشی"></div>
+  <div><button class="btn">ارسال</button></div>
+</form></div>
+<div class="card"><h3>پیامک‌های ارسال‌شده</h3>
+<table><tr><th>زمان</th><th>موبایل</th><th>کاربر</th><th>نوع</th><th>متن</th><th>نتیجه</th></tr>
+{% for r in log %}<tr><td>{{ r.ts|jdt }}</td><td class="ltr">{{ r.mobile }}</td><td>{{ r.username }}</td><td>{{ purposes.get(r.purpose, r.purpose) }}</td><td class="wrap">{{ r.text }}</td>
+<td>{% if r.ok %}<span class="badge ok">ارسال شد</span>{% else %}<span class="badge err">ناموفق</span> <span class="hint">{{ r.error }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">هنوز پیامکی ارسال نشده</td></tr>{% endfor %}</table></div>
+{% endblock %}

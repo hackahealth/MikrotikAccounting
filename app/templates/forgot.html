@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>بازیابی رمز — TAPIK Net</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="login card">
+<h2 style="margin:0">TAPIK Net</h2><div class="hint" style="margin-bottom:14px">سامانه مدیریت شبکه تاپیک</div><h3>بازیابی رمز با پیامک</h3>
+{% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
+{% if step == 'done' %}
+<p><a class="btn p" href="/login">ورود</a></p>
+{% elif step == 'code' %}
+<form method="post" action="/forgot/reset" autocomplete="off">
+<input type="hidden" name="mobile" value="{{ mobile }}">
+<div class="fg"><label>کد تایید پیامک‌شده به <span class="ltr">{{ masked }}</span></label><input name="code" class="ltr" inputmode="numeric" maxlength="8" autofocus required></div>
+{% if multi %}<div class="fg"><label>نام کاربری (در پیامک آمده)</label><input name="username" class="ltr" required></div>{% endif %}
+<div class="fg"><label>رمز جدید</label><input name="password" type="password" class="ltr" autocomplete="new-password" required></div>
+<div class="fg"><label>تکرار رمز جدید</label><input name="password2" type="password" class="ltr" autocomplete="new-password" required></div>
+<p class="hint">دست‌کم ۸ نویسه، با سه نوع از این‌ها: حرف کوچک، حرف بزرگ، عدد، نشانه. نام کاربری در رمز نباشد.</p>
+<button class="btn p">تغییر رمز</button>
+</form>
+<form method="post" action="/forgot/send" style="margin-top:10px"><input type="hidden" name="mobile" value="{{ mobile }}"><button class="btn s">ارسال دوبارهٔ کد</button></form>
+{% else %}
+<form method="post" action="/forgot/send">
+<div class="fg"><label>شماره موبایل ثبت‌شده</label><input name="mobile" class="ltr" inputmode="tel" placeholder="09121234567" autofocus required></div>
+<button class="btn p">ارسال کد تایید</button>
+</form>
+<p class="hint" style="margin-top:10px">یک کد تایید و نام کاربری شما به این شماره پیامک می‌شود. با آن کد، رمز جدید حساب دامنه (ویندوز / اینترنت) را تعیین کنید.</p>
+{% endif %}
+<p class="hint" style="margin-top:14px"><a href="/login">بازگشت به ورود</a></p>
+</div></body></html>

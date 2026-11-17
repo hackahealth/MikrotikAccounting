@@ -154,6 +154,8 @@ class User(Base):
     usage_reset_at = Column(DateTime, nullable=True)      # manual quota reset point
     quota_msg_level = Column(String(10), default="")      # automatic quota message sent: warn | err
     quota_msg_at = Column(DateTime, nullable=True)
+    quota_sms_level = Column(String(10), default="")      # quota SMS sent: warn | err (app/quotamsg.sms_check)
+    quota_sms_at = Column(DateTime, nullable=True)
 
 
 class Nas(Base):
@@ -670,6 +672,54 @@ class LogonViolation(Base):
     reasons = Column(String(500), default="")                 # why it is a violation
     actions = Column(String(1000), default="")                # what was done (AD disabled, locks ...)
     event = Column(String(300), default="")                   # event id / server / status
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String(100), default="")
+    note = Column(Text, default="")
+
+
+class SmsLog(Base):
+    """Every SMS the system tried to send (codes / passwords are masked)."""
+    __tablename__ = "sms_log"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)
+    mobile = Column(String(20), default="")
+    username = Column(String(150), default="")
+    purpose = Column(String(20), default="")                  # test | reset_admin | reset_otp | reset_done | quota ...
+    text = Column(String(500), default="")
+    ok = Column(Boolean, default=False)
+    error = Column(String(300), default="")
+
+
+class ResetCode(Base):
+    """One-time SMS code of the self-service password reset (/forgot)."""
+    __tablename__ = "reset_codes"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)
+    mobile = Column(String(20), index=True)
+    code_hash = Column(String(128), default="")
+    expires_at = Column(DateTime)
+    tries = Column(Integer, default=0)
+    used = Column(Boolean, default=False)
+    ip = Column(String(45), default="")
+
+
+class SharedUse(Base):
+    """Several users logged on to the same device (computer or mobile, by MAC) at the same time: Windows logons (AD)
+    and / or hotspot logins (shareduse.py). One row per episode; a new episode on the same device counts as a repeat."""
+    __tablename__ = "shared_use"
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime, default=now, index=True)            # first seen
+    last_ts = Column(DateTime, default=now, index=True)
+    mac = Column(String(17), index=True, nullable=False)
+    ip = Column(String(45), default="")
+    device = Column(String(150), default="")                  # label / hostname at that time
+    device_type = Column(String(20), default="")
+    users = Column(String(1000), default="")                  # ",ali,reza," (lower case, for LIKE '%,x,%')
+    detail = Column(String(1000), default="")                 # "ali: ویندوز · reza: هات‌اسپات"
+    repeat = Column(Integer, default=1)                       # episodes of this device in the repeat window
+    msg = Column(String(500), default="")                     # warning message results (Windows / hotspot)
+    sms = Column(String(500), default="")                     # SMS results
+    actions = Column(String(1000), default="")                # blocks done (automatic or by hand)
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(String(100), default="")
     note = Column(Text, default="")

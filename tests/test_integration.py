@@ -3179,3 +3179,303 @@ def test_logon_guard_protected_server_and_unusual_logons(env, monkeypatch):
     set_setting(db, "ldap_server", "")
     db.commit()
     db.close()
+
+
+def test_disconnect_never_500_and_quota_users_cut(env, monkeypatch):
+    from app import jobs, policy, routeros
+    from app.db import now
+    from app.web import app
+    db = SessionLocal()
+    nas = db.query(Nas).filter(Nas.ip == "127.0.0.1").first()
+    nas.api_user, nas.api_password_enc, nas.api_host = "admin", encrypt("x"), "127.0.0.9"
+    u = User(username="Cutme", password_enc=encrypt("x"), quota_mb=1, quota_period="monthly")
+    db.add(u)
+    db.commit()
+    rows = []
+    for sid, svc in (("r-1", "hotspot"), ("api:1:hs:*5", "hotspot"), ("r-2", "vpn")):
+        s = AcctSession(user_id=u.id, username="cutme", acct_session_id=sid, nas_ip="127.0.0.1", service=svc,
+                        framed_ip="10.5.0.9" if svc == "hotspot" else "", active=True, start_time=now(),
+                        last_update=now())
+        db.add(s)
+        db.commit()
+        rows.append(s.id)
+    db.close()
+
+    def boom(*a, **k):
+        raise RuntimeError("router said no")
+    monkeypatch.setattr(routeros, "disconnect_api", boom)
+    monkeypatch.setattr(routeros, "disconnect_coa", boom)       # even an unexpected error is no 500
+    with TestClient(app) as c:
+        _login(c, "admin", "Secret12345")
+        r = c.post(f"/live/{rows[0]}/disconnect")
+        assert r.status_code == 200 and "ناموفق" in r.text
+        assert c.post("/live/999999/disconnect").status_code == 200
+        calls = []
+        monkeypatch.setattr(routeros, "disconnect_api", lambda n, name, service="", cookies=True: calls.append(name) or 1)
+        r = c.post(f"/live/{rows[0]}/disconnect")
+        assert "قطع شد" in r.text and calls == ["cutme"]
+    db = SessionLocal()
+    s = db.get(AcctSession, rows[0])
+    assert not s.active and s.terminate_cause == "Admin-Reset"
+    db.close()
+
+    # quota used up: every live session of the user is cut by the enforce job, one router call per user/service
+    calls.clear()
+    monkeypatch.setattr(policy, "quota_state", lambda db, user, eff=None: (1, 5, 0) if user.username == "Cutme"
+                        else (None, 0, None))
+    jobs.enforce()
+    assert sorted(calls) == ["cutme", "cutme"]          # hotspot once (2 sessions) + vpn once
+    db = SessionLocal()
+    assert all(not db.get(AcctSession, i).active for i in rows)
+    assert db.get(AcctSession, rows[1]).terminate_cause == "Policy:quota"
+    db.query(AcctSession).filter(AcctSession.id.in_(rows)).delete()
+    db.delete(db.get(User, u.id))
+    nas.api_user = ""
+    db.merge(nas)
+    db.commit()
+    db.close()
+
+
+def test_routeros_disconnect_api_removes_logins_and_cookies(monkeypatch):
+    from app import routeros
+
+    class P:
+        def __init__(self, items):
+            self.items = items
+            self.removed = []
+
+        def __iter__(self):
+            return iter(self.items)
+
+        def remove(self, *ids):
+            self.removed += ids
+    paths = {("ip", "hotspot", "active"): P([{".id": "*1", "user": "Ali"}, {".id": "*2", "user": "bob"}]),
+             ("ppp", "active"): P([{".id": "*7", "name": "ali"}]),
+             ("ip", "hotspot", "cookie"): P([{".id": "*c", "user": "ALI"}])}
+
+    class Conn:
+        def path(self, *p):
+            return paths[p]
+
+        def close(self):
+            pass
+    monkeypatch.setattr(routeros, "api", lambda nas: Conn())
+    assert routeros.disconnect_api(Nas(name="x"), "ali", "hotspot") == 2
+    assert paths[("ip", "hotspot", "active")].removed == ["*1"] and paths[("ppp", "active")].removed == ["*7"]
+    assert paths[("ip", "hotspot", "cookie")].removed == ["*c"]
+
+
+def test_sms_password_reset_admin_and_self_service_and_quota_sms(env, monkeypatch):
+    import re as _re
+
+    from app import pwreset, quotamsg, sms
+    from app.db import SmsLog, User as U, decrypt, set_setting
+    from app.web import app
+    sent = []
+    monkeypatch.setattr(sms, "_transport", lambda provider, st, to, text: sent.append((provider, to, text)) or (True, ""))
+    db = SessionLocal()
+    u = U(username="sms.user", password_enc=encrypt("old"), mobile="۰۹۱۲ ۱۲۳ ۴۵۶۷", full_name="کاربر پیامک")
+    db.add(u)
+    db.commit()
+    uid = u.id
+    assert sms.normalize_mobile("+98 912 123 4567") == "09121234567" == sms.normalize_mobile("9121234567")
+    assert not sms.enabled(db)
+    db.close()
+    with TestClient(app) as c:
+        _login(c, "admin", "Secret12345")
+        assert "رمز را فراموش کرده‌ام" not in TestClient(app).get("/login").text     # off until SMS is set up
+        r = c.post(f"/users/{uid}/sms-reset", data={"back": "/users"})
+        assert "پیامک فعال یا تنظیم نشده" in r.text
+        c.post("/sms/save", data={"sms_enabled": "1", "sms_provider": "kavenegar", "sms_api_key": "KEY",
+                                  "sms_sender": "10008663", "sms_title": "سامانه مدیریت شبکه تاپیک",
+                                  "sms_reset_self": "1", "sms_reset_admin": "1", "sms_quota_enabled": "1",
+                                  "sms_quota_exhausted": "1"})
+        page = c.get("/sms").text
+        assert "KEY" not in page and "ثبت شده" in page
+        c.post("/sms/save", data={"sms_enabled": "1", "sms_provider": "kavenegar", "sms_api_key": "",
+                                  "sms_reset_self": "1", "sms_reset_admin": "1", "sms_quota_enabled": "1",
+                                  "sms_quota_exhausted": "1", "sms_title": "سامانه مدیریت شبکه تاپیک"})
+        db = SessionLocal()
+        assert sms.settings(db)["api_key"] == "KEY"         # an empty field keeps the stored key
+        db.close()
+        assert "ریست رمز با پیامک" in c.get("/users").text
+        r = c.post(f"/users/{uid}/sms-reset", data={"back": "/users"})
+        assert "پیامک شد" in r.text, r.text[:2000]
+        provider, to, text = sent[-1]
+        assert provider == "kavenegar" and to == "09121234567"
+        assert text.startswith("سامانه مدیریت شبکه تاپیک\n") and "نام کاربری: sms.user" in text
+        pw = _re.search(r"رمز جدید: (\S+)", text).group(1)
+        db = SessionLocal()
+        assert decrypt(db.get(U, uid).password_enc) == pw
+        log = db.query(SmsLog).order_by(SmsLog.id.desc()).first()
+        assert log.ok and pw not in log.text and "****" in log.text
+        db.close()
+        r = c.post("/sms/test", data={"mobile": "0912", "text": "x"})
+        assert "شماره موبایل نادرست" in r.text
+
+    # self service from the login page
+    with TestClient(app) as c:
+        assert "رمز را فراموش کرده‌ام" in c.get("/login").text
+        assert c.get("/forgot").status_code == 200
+        r = c.post("/forgot/send", data={"mobile": "09999999999"})
+        assert "ثبت نشده" in r.text
+        r = c.post("/forgot/send", data={"mobile": "۰۹۱۲۱۲۳۴۵۶۷"})
+        assert "کد تایید" in r.text and 'name="code"' in r.text
+        text = sent[-1][2]
+        code = _re.search(r"کد تایید: (\d{6})", text).group(1)
+        assert "نام کاربری: sms.user" in text
+        assert "ثانیه دیگر" in c.post("/forgot/send", data={"mobile": "09121234567"}).text   # resend limit
+        r = c.post("/forgot/reset", data={"mobile": "09121234567", "code": "000000" if code != "000000" else "111111",
+                                          "password": "NewPass#2024", "password2": "NewPass#2024"})
+        assert "کد تایید درست نیست" in r.text
+        r = c.post("/forgot/reset", data={"mobile": "09121234567", "code": code, "password": "short",
+                                          "password2": "short"})
+        assert "۸ نویسه" in r.text
+        r = c.post("/forgot/reset", data={"mobile": "09121234567", "code": code, "password": "NewPass#2024",
+                                          "password2": "NewPass#2024"})
+        assert "تغییر کرد" in r.text, r.text[:2000]
+        assert "تغییر کرد" in sent[-1][2]
+        r = c.post("/forgot/reset", data={"mobile": "09121234567", "code": code, "password": "Other#2024x",
+                                          "password2": "Other#2024x"})
+        assert "منقضی" in r.text                              # one use only
+    db = SessionLocal()
+    assert decrypt(db.get(U, uid).password_enc) == "NewPass#2024"
+
+    # AD user: the new password goes to AD
+    calls = []
+    monkeypatch.setattr(pwreset, "_ad_mobile", lambda db, user: "")
+    ad_u = U(username="ad.sms", source="ldap", mobile="09350000000", ldap_dn="CN=Ad,DC=x")
+    db.add(ad_u)
+    db.commit()
+
+    class FakeAD:
+        def __init__(self, db, secure=False):
+            assert secure
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def find_user(self, sam):
+            return ""
+
+        def set_password(self, dn, pw, must):
+            calls.append((dn, pw, must))
+
+        def unlock(self, dn):
+            pass
+    from app import ad_admin
+    monkeypatch.setattr(ad_admin, "AD", FakeAD)
+    ok, msg = pwreset.admin_reset(db, ad_u, must_change=True)
+    assert ok and calls[-1][0] == "CN=Ad,DC=x" and calls[-1][2] is True and "نام کاربری: ad.sms" in sent[-1][2]
+
+    # quota SMS at the warning percent and when the quota runs out, once per level
+    from app import policy
+    from app.db import now
+    s = AcctSession(user_id=uid, username="sms.user", acct_session_id="q-1", nas_ip="127.0.0.1", service="hotspot",
+                    active=True, start_time=now(), last_update=now())
+    db.add(s)
+    db.commit()
+    level = {"v": "warn"}
+    monkeypatch.setattr(policy, "quota_warning", lambda db, user: {"level": level["v"], "text": "۸۰٪ حجم مصرف شده",
+                                                                      "pct": 80} if user.id == uid else None)
+    n = len(sent)
+    assert quotamsg.sms_check(db) == [("sms.user", "warn", True)]
+    assert "۸۰٪" in sent[-1][2] and "sms.user" in sent[-1][2] and len(sent) == n + 1
+    assert quotamsg.sms_check(db) == []
+    level["v"] = "err"
+    assert quotamsg.sms_check(db) == [("sms.user", "err", True)] and "تمام شد" in sent[-1][2]
+    db.delete(s)
+    db.delete(db.get(U, uid))
+    db.delete(ad_u)
+    set_setting(db, "sms_enabled", "0")
+    db.commit()
+    db.close()
+
+
+def test_several_users_on_one_device(env, monkeypatch):
+    """Two Windows (AD) users on one computer and two hotspot users on one mobile: one episode each with the users
+    listed separately, editable warning (Windows msg, hotspot status page), SMS, repeat -> device and users locked,
+    exempt devices skipped, panel pages and actions."""
+    from datetime import timedelta
+    from app import devices, logons, security, shareduse
+    from app.db import AcctSession, Lock, SharedUse, User, now, set_setting
+    from app.web import app
+    db = SessionLocal()
+    ts = now()
+    pc, mob = "EE:55:00:00:00:01", "EE:55:00:00:00:02"
+    devices.record(db, pc, ip="192.168.88.71", source="arp", ts=ts, hostname="ACC-PC71")
+    devices.record(db, mob, ip="192.168.88.72", source="arp", ts=ts, hostname="Galaxy-A52")
+    db.add(User(username="sh.one", mobile="09121112233"))
+    db.add(User(username="sh.two", mobile=""))
+    db.flush()
+    logons.record(db, "CORP\\sh.one", ts - timedelta(minutes=5), "dc", ip="192.168.88.71")
+    logons.record(db, "sh.two@corp.local", ts - timedelta(minutes=2), "dc", ip="192.168.88.71")
+    for i, u in enumerate(("hs.a", "hs.b")):
+        db.add(AcctSession(acct_session_id=f"SH{i}", nas_ip="127.0.0.1", username=u, service="hotspot",
+                           framed_ip="192.168.88.72", mac=mob, start_time=ts, last_update=ts, active=True))
+    for k, v in {"share_enabled": "1", "share_msg_enabled": "1", "share_sms_enabled": "1", "share_block_after": "2",
+                 "share_block_what": "both", "share_msg_text": "روی {device} چند کاربر: {users} (بار {count})"}.items():
+        set_setting(db, k, v)
+    db.commit()
+    msgs, sms = [], []
+    new = shareduse.check(db, ts=ts, send=lambda ip, t: msgs.append((ip, t)) or (True, ""),
+                          sms=lambda m, t: sms.append((m, t)) or (True, ""), do_kick=False)
+    mine = {i.mac: i for i in new if i.mac in (pc, mob)}
+    assert set(mine) == {pc, mob}
+    assert shareduse.users_of(mine[pc]) == ["sh.one", "sh.two"] and "ویندوز" in mine[pc].detail
+    assert shareduse.users_of(mine[mob]) == ["hs.a", "hs.b"] and "هات‌اسپات" in mine[mob].detail
+    assert ("192.168.88.71", "اخطار واحد فناوری اطلاعات\n\nروی ACC-PC71 چند کاربر: sh.one، sh.two (بار 1)") in msgs
+    assert "صفحهٔ هات‌اسپات" in mine[mob].msg
+    assert [m for m, _ in sms] == ["09121112233"] and "sh.one" in sms[0][1]
+    assert "sh.two: موبایل ثبت نشده" in mine[pc].sms
+    assert not security.locked(db, "sh.one")
+    # still the same episode on the next round
+    assert [i for i in shareduse.check(db, ts=ts + timedelta(minutes=1), send=lambda ip, t: (True, ""),
+                                       sms=lambda m, t: (True, ""), do_kick=False) if i.mac in (pc, mob)] == []
+    # hotspot status page banner for a user of the mobile
+    hs_user = User(username="hs.a")
+    db.add(hs_user)
+    db.commit()
+    assert "Galaxy-A52" in shareduse.hotspot_warning(db, hs_user)
+    # a later episode on the same computer: second time -> device and both users locked
+    db.query(SharedUse).filter(SharedUse.mac == pc).update({"last_ts": ts - timedelta(hours=3)})
+    db.commit()
+    new = shareduse.check(db, ts=ts + timedelta(minutes=2), send=lambda ip, t: (True, ""),
+                          sms=lambda m, t: (True, ""), do_kick=False)
+    again = [i for i in new if i.mac == pc]
+    assert again and again[0].repeat == 2
+    assert security.locked(db, source=pc) and security.locked(db, "sh.one") and security.locked(db, "sh.two")
+    assert "قفل شد" in again[0].actions
+    # exempt device type: no episode
+    db.query(SharedUse).filter(SharedUse.mac == mob).update({"last_ts": ts - timedelta(hours=3)})
+    db.query(devices.Device).filter_by(mac=mob).update({"device_type": "server"})
+    db.commit()
+    assert [i for i in shareduse.check(db, ts=ts + timedelta(minutes=3), send=lambda ip, t: (True, ""),
+                                       sms=lambda m, t: (True, ""), do_kick=False) if i.mac == mob] == []
+    sid = again[0].id
+    db.close()
+    with TestClient(app) as c:
+        c.post("/login", data={"username": "admin", "password": "Secret12345"})
+        for tab in ("episodes", "repeat", "settings"):
+            r = c.get(f"/shared?tab={tab}")
+            assert r.status_code == 200 and "چند کاربر روی یک دستگاه" in r.text, tab
+        assert "ACC-PC71" in c.get("/shared?show=all").text
+        r = c.post("/shared/settings", data={"share_enabled": "1", "share_window": "45", "share_msg_text": "متن تازه {users}",
+                                             "share_block_what": "users", "share_block_after": "3"},
+                   follow_redirects=False)
+        assert r.status_code == 303
+        db = SessionLocal()
+        st = shareduse.settings(db)
+        assert st["window"] == 45 and st["msg_text"] == "متن تازه {users}" and st["block_what"] == "users"
+        assert not st["msg_enabled"]
+        db.close()
+        r = c.post(f"/shared/{sid}/resolve", data={"note": "تذکر داده شد", "release": "1"}, follow_redirects=False)
+        assert r.status_code == 303
+        db = SessionLocal()
+        assert db.get(SharedUse, sid).resolved_at is not None
+        assert not security.locked(db, "sh.one") and not security.locked(db, source=pc)
+        assert db.query(Lock).filter(Lock.value == "sh.one", Lock.released_by == "admin").count() == 1
+        db.close()

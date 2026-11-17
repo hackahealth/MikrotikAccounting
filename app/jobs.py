@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import timedelta
 
-from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logonguard, logons, monitor,
+from . import (access, quotamsg, apisessions, classifier, config, devices, grants, ifstats, ldap_ad, logonguard, logons, monitor, shareduse,
                netscope, nightlist, pbx, pingcheck, policy, retention, routeros, security, wancheck)
 from .db import AcctSession, Nas, SessionLocal, User, get_setting, now
 
@@ -36,39 +36,67 @@ def enforce():
             nas_by_ip.setdefault(n.ip, n)
             if n.api_host:
                 nas_by_ip.setdefault(n.api_host, n)
+        todo = []           # (session id, nas, username, service, acct id, ip, reason)
+        reasons = {}        # user id -> reason (one check per user per round)
         for s in db.query(AcctSession).filter(AcctSession.active.is_(True)).all():
             user = db.get(User, s.user_id) if s.user_id else None
             if user is None or s.service == "proxy":          # the proxy cuts its own users
                 continue
-            eff = policy.Effective(user)
-            reason = ""
-            if not user.enabled:
-                reason = "disabled"
-            elif security.locked(db, user.username, s.mac or ""):
-                reason = "locked"
-            elif user.expire_at and ts.date() > user.expire_at:
-                reason = "expired"
-            else:
-                try:
-                    rules = policy.parse_hours(eff.allowed_hours)
-                except ValueError:
-                    rules = None
-                if not policy.hours_allowed(rules, ts) and not grants.active(db, user.id, "hours", ts):
-                    reason = "hours"
-                else:
-                    q, used, rem = policy.quota_state(db, user, eff)
-                    if q is not None and rem <= 0 and not grants.active(db, user.id, "internet", ts):
-                        reason = "quota"
+            try:
+                if user.id not in reasons:
+                    reasons[user.id] = _deny_reason(db, user, s, ts)
+                reason = reasons[user.id] or (
+                    "locked" if s.mac and security.locked(db, user.username, s.mac) else "")
+            except Exception:       # noqa: BLE001  one bad user must not stop the others from being cut
+                log.exception("enforce: check of %s failed", s.username)
+                continue
             nas = nas_by_ip.get(s.nas_ip) or nas_by_ip.get("0.0.0.0")
             if reason and nas is not None:
-                ok = routeros.disconnect(nas, s.username, s.service, s.acct_session_id, s.framed_ip)
-                log.info("enforce: disconnect %s (%s) -> %s", s.username, reason, ok)
-                if ok:
-                    s.terminate_cause = f"Policy:{reason}"
+                todo.append((s.id, nas, s.username, s.service, s.acct_session_id or "", s.framed_ip or "", reason))
+        db.commit()         # no transaction stays open while talking to the routers
+        done = set()
+        cut = []
+        for sid, nas, username, service, asid, fip, reason in todo:
+            key = (nas.id, username.lower(), service)
+            if key in done:          # the API removes every login of the user on that router at once
+                cut.append((sid, reason))
+                continue
+            ok = routeros.disconnect(nas, username, service, asid, fip)
+            log.info("enforce: disconnect %s (%s) -> %s", username, reason, ok)
+            if ok:
+                done.add(key)
+                cut.append((sid, reason))
+        for sid, reason in cut:
+            s = db.get(AcctSession, sid)
+            if s is not None:
+                s.terminate_cause = f"Policy:{reason}"
+                if s.active:
+                    s.active, s.stop_time = False, now()
         db.commit()
     finally:
         db.close()
         SessionLocal.remove()
+
+
+def _deny_reason(db, user, s, ts) -> str:
+    """Why this user may not be online now ('' = allowed)."""
+    eff = policy.Effective(user)
+    if not user.enabled:
+        return "disabled"
+    if security.locked(db, user.username, ""):
+        return "locked"
+    if user.expire_at and ts.date() > user.expire_at:
+        return "expired"
+    try:
+        rules = policy.parse_hours(eff.allowed_hours)
+    except ValueError:
+        rules = None
+    if not policy.hours_allowed(rules, ts) and not grants.active(db, user.id, "hours", ts):
+        return "hours"
+    q, used, rem = policy.quota_state(db, user, eff)
+    if q is not None and rem <= 0 and not grants.active(db, user.id, "internet", ts):
+        return "quota"
+    return ""
 
 
 def _arp_live(a) -> bool:
@@ -286,5 +314,6 @@ def start():
     _every(60, nightlist.job)
     _every(60, access.job)
     _every(quotamsg.EVERY, quotamsg.job)
+    _every(shareduse.EVERY, shareduse.job)
     threading.Thread(target=pingcheck.job, daemon=True, name="job-pingcheck").start()
     _every(86400, cleanup)
