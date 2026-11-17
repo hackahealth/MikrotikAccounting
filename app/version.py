@@ -1,1 +1,1 @@
-VERSION = "1.26.1"     # 2026-11-16: logon guard per logon type: block or only record; log of every logon to protected servers
+VERSION = "1.27.0"     # 2026-11-17: several users on one device: separate list, editable warning (msg / hotspot / SMS), block on repeat

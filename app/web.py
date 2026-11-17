@@ -25,9 +25,9 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import (access, proxy, pbxssh, quotamsg, ad_admin, alerts, ami, auth, pbxapi, classifier, config, devices, grants, hotspot, ifstats, jalali, logonguard, logons, monitor, nightlist, pbx,
-               jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, winmsg, security, tour, xlsx)
+               jobs, ldap_ad, mgmt, netobjects, netscope, pingcheck, policy, reports, retention, rosadmin, routeros, scope, shareduse, winmsg, security, tour, xlsx)
 from .db import (LDAP_KEYS, AccessExempt, AdChoice, SiteRule, AcctSession, Alert, DeviceTraffic, NetObject, AuditLog, AuthLog, Call, Lock, NetEvent, TempGrant, DeployLog, Department, Device, DeviceHistory,
-                 ExtensionAssignment, Group, GuardLogon, LogonViolation, NightList, PbxServer, ProtectedTarget,
+                 ExtensionAssignment, Group, GuardLogon, LogonViolation, SharedUse, NightList, PbxServer, ProtectedTarget,
                  HotspotPackage, Nas, Office, PanelUser, SessionLocal, SpeedSample, TrafficCategory, TrafficDomain, User,
                  decrypt, encrypt, get_setting, init_db, now, request_scope, set_setting)
 from .version import VERSION
@@ -2948,12 +2948,17 @@ def hotspot_warn(request: Request, u: str = ""):
                                             AcctSession.last_update >= stale).all()
         if not any(ip and ip in (x.framed_ip, x.nas_ip) for x in live):
             return js
+        out = []
+        shared = shareduse.hotspot_warning(db, user)            # several users on this device: editable warning
+        if shared:
+            out.append(WARN_JS % ("#c62828", json.dumps(shared)))
         w = policy.quota_warning(db, user)
-        if not w:
+        if w:
+            color = "#c62828" if w["level"] == "err" else "#ef6c00"
+            out.append(WARN_JS % (color, json.dumps(w["text"])))
+        if not out:
             return js
-        color = "#c62828" if w["level"] == "err" else "#ef6c00"
-        return Response(WARN_JS % (color, json.dumps(w["text"])), media_type="application/javascript",
-                        headers={"Cache-Control": "no-store"})
+        return Response("\n".join(out), media_type="application/javascript", headers={"Cache-Control": "no-store"})
     finally:
         db.close()
         SessionLocal.remove()
@@ -3788,6 +3793,122 @@ def winlogons_page(request: Request, q: str = "", frm: str = "", to: str = ""):
 
 
 # ------------------------------------------------------------------ logon guard: protected servers, unusual logons
+# ------------------------------------------------------------------ several users on one device
+@app.get("/shared", response_class=HTMLResponse)
+def shared_page(request: Request, tab: str = "episodes", q: str = "", frm: str = "", to: str = "", show: str = "open"):
+    db = SessionLocal()
+    st = shareduse.settings(db)
+    d1, d2 = _date(frm), _date(to)
+    d2 = d2 or now().date()
+    d1 = d1 or (d2 - timedelta(days=7))
+    start, end = datetime.combine(d1, datetime.min.time()), datetime.combine(d2 + timedelta(days=1), datetime.min.time())
+    q = q.strip()
+    ctx = {"tab": tab, "q": q, "frm": jalali.to_jalali_str(d1), "to": jalali.to_jalali_str(d2), "show": show, "st": st,
+           "block_what": shareduse.BLOCK_WHAT, "sms_ok": shareduse.sms_available(db),
+           "sms_installed": shareduse._sms() is not None, "msg_ok": winmsg.available(),
+           "default_text": shareduse.DEFAULT_TEXT, "default_sms": shareduse.DEFAULT_SMS}
+    if tab == "repeat":
+        ctx["by_dev"], ctx["by_user"] = shareduse.summary(db, st["repeat_days"])
+    elif tab == "episodes":
+        sq = db.query(SharedUse).filter(SharedUse.last_ts >= start, SharedUse.ts < end)
+        if show == "open":
+            sq = sq.filter(SharedUse.resolved_at.is_(None))
+        if q:
+            sq = sq.filter(SharedUse.users.ilike(f"%{q}%") | SharedUse.device.ilike(f"%{q}%")
+                           | SharedUse.mac.ilike(f"%{q}%") | SharedUse.ip.ilike(f"%{q}%"))
+        rows = sq.order_by(SharedUse.last_ts.desc()).limit(1000).all()
+        locks = {(lk.kind, lk.value.lower()) for lk in security.active_locks(db).filter(Lock.kind.in_(("mac", "user")))}
+        ctx.update(rows=rows, locks=locks, users_of=shareduse.users_of,
+                   n_open=db.query(SharedUse).filter(SharedUse.resolved_at.is_(None)).count())
+    return render(request, "shared.html", **ctx)
+
+
+@app.post("/shared/settings")
+async def shared_settings(request: Request):
+    form = await request.form()
+    db = SessionLocal()
+    for k in ("share_enabled", "share_msg_enabled", "share_sms_enabled", "share_block_ad", "share_kick"):
+        set_setting(db, k, "1" if form.get(k) else "0")
+    for k in ("share_window", "share_msg_seconds", "share_repeat_days", "share_block_after", "share_block_minutes"):
+        v = str(form.get(k, "")).strip()
+        set_setting(db, k, v if v.isdigit() else "")
+    what = str(form.get("share_block_what", "none"))
+    set_setting(db, "share_block_what", what if what in shareduse.BLOCK_WHAT else "none")
+    for k, n in (("share_msg_title", 150), ("share_msg_text", 2000), ("share_sms_text", 600),
+                 ("share_ignore_users", 2000), ("share_exempt", 4000), ("share_exempt_types", 300)):
+        v = str(form.get(k, "")).strip()[:n]
+        if k == "share_msg_text" and v == shareduse.DEFAULT_TEXT.strip():
+            v = ""
+        if k == "share_sms_text" and v == shareduse.DEFAULT_SMS.strip():
+            v = ""
+        set_setting(db, k, v)
+    db.commit()
+    log_action(request, "تنظیم چند کاربر روی یک دستگاه")
+    if form.get("run"):
+        await run_in_threadpool(shareduse.job)
+        flash(request, "ذخیره شد و بررسی انجام شد")
+        return redirect("/shared")
+    flash(request, "ذخیره شد")
+    return redirect("/shared?tab=settings")
+
+
+@app.post("/shared/{sid}/{action}")
+async def shared_action(request: Request, sid: int, action: str):
+    """msg | sms | block | resolve on one episode."""
+    form = await request.form()
+    db = SessionLocal()
+    inc = db.get(SharedUse, sid)
+    back = _local(form.get("back"), "/shared")
+    if inc is None:
+        return redirect(back)
+    me = request.state.me.username
+    st = shareduse.settings(db)
+    if action == "msg":
+        res = await run_in_threadpool(shareduse.warn, db, inc, st)
+        log_action(request, "پیام اخطار چند کاربر", f"{inc.device}: {res}")
+        flash(request, res)
+    elif action == "sms":
+        if not shareduse.sms_available(db):
+            flash(request, "پیامک تنظیم نشده (صفحهٔ تنظیمات پیامک)", "err")
+            return redirect(back)
+        res = await run_in_threadpool(shareduse.send_sms, db, inc, st)
+        log_action(request, "پیامک اخطار چند کاربر", f"{inc.device}: {res}")
+        flash(request, res)
+    elif action == "block":
+        what = str(form.get("what", "device"))
+        users = [str(u).lower() for u in form.getlist("user")]
+        if what == "users" and not users:
+            what = "none"
+        if users and what == "device":
+            what = "both"
+        if what not in ("device", "users", "both"):
+            flash(request, "چیزی برای مسدودی انتخاب نشد", "err")
+            return redirect(back)
+        mins = str(form.get("minutes", "")).strip()
+        acts = await run_in_threadpool(shareduse.block, db, inc, what, me, int(mins) if mins.isdigit() else 0,
+                                       bool(form.get("block_ad")), True, users)
+        log_action(request, "مسدودی (چند کاربر روی یک دستگاه)", f"{inc.device}: {' · '.join(acts)}")
+        flash(request, " · ".join(acts) or "کاری انجام نشد")
+    elif action == "resolve":
+        note = str(form.get("note", "")).strip()
+        done = []
+        if form.get("release"):
+            names = set(shareduse.users_of(inc))
+            for lk in security.active_locks(db).filter(Lock.kind.in_(("mac", "user"))):
+                if "چند کاربر روی یک دستگاه" not in (lk.reason or ""):
+                    continue
+                if (lk.kind == "mac" and lk.value.lower() == inc.mac.lower()) or \
+                        (lk.kind == "user" and lk.value.lower() in names):
+                    security.unlock(db, lk.id, me, note)
+                    done.append(f"قفل {security.KINDS[lk.kind]} {lk.value} باز شد")
+        inc.resolved_at, inc.resolved_by = now(), me
+        inc.note = "\n".join(x for x in (note, " · ".join(done)) if x)[:4000]
+        log_action(request, "رسیدگی چند کاربر روی یک دستگاه", f"{inc.device}: {' · '.join(done) or 'بسته شد'}")
+        flash(request, " · ".join(done) or "بسته شد")
+    db.commit()
+    return redirect(back)
+
+
 @app.get("/guard", response_class=HTMLResponse)
 def logonguard_page(request: Request, tab: str = "violations", q: str = "", frm: str = "", to: str = "",
                     show: str = "open"):
